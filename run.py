@@ -85,6 +85,8 @@ ENABLE_QCN 1
 ENABLE_BCC {enable_bcc}
 BCC_U {bcc_u}
 BCC_S {bcc_s}
+BCC_CONTROL_PERIOD {bcc_control_period}
+BCC_MD_FACTOR {bcc_md_factor}
 USE_DYNAMIC_PFC_THRESHOLD 1
 PACKET_PAYLOAD_SIZE 1000
 
@@ -104,6 +106,7 @@ cc_modes = {
     "hpcc": 3,
     "timely": 7,
     "dctcp": 8,
+    "bcc": 10,
 }
 
 lb_modes = {
@@ -208,6 +211,10 @@ def main():
                         type=float, default=0.9, help="BCC TU utilization threshold (default: 0.9)")
     parser.add_argument('--bcc_s', dest='bcc_s', action='store',
                         type=float, default=1.0, help="BCC TC queue-slope threshold (default: 1.0)")
+    parser.add_argument('--bcc_control_period_us', dest='bcc_control_period_us', action='store',
+                        type=float, default=55.0, help="BCC source control period in us (default: 55)")
+    parser.add_argument('--bcc_md_factor', dest='bcc_md_factor', action='store',
+                        type=float, default=0.1, help="BCC PCM gentle multiplicative decrease factor (default: 0.1)")
 
     # #### CONWEAVE PARAMETERS ####
     # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
@@ -236,6 +243,7 @@ def main():
     lb_mode = lb_modes[args.lb]
     enabled_pfc = int(args.pfc)
     enabled_irn = int(args.irn)
+    enable_bcc = 1 if cc_mode == 10 else args.enable_bcc
     bw = int(args.bw)
     buffer = args.buffer
     topo = args.topo
@@ -418,7 +426,7 @@ def main():
     qlen_mon_start = flowgen_start_time
     qlen_mon_end = flowgen_stop_time
 
-    if (cc_mode == 1):  # DCQCN
+    if (cc_mode == 1 or cc_mode == 10):  # DCQCN or BCC-with-DCQCN PCM
         ai = 10 * bw / 25
         hai = 25 * bw / 25
         dctcp_ai = 1000
@@ -439,9 +447,11 @@ def main():
                                         ai=ai, hai=hai, dctcp_ai=dctcp_ai,
                                         alpha_resume_interval=args.dcqcn_ti_us,
                                         rate_decrease_interval=args.dcqcn_td_us,
-                                        enable_bcc=args.enable_bcc,
+                                        enable_bcc=enable_bcc,
                                         bcc_u=args.bcc_u,
                                         bcc_s=args.bcc_s,
+                                        bcc_control_period=args.bcc_control_period_us,
+                                        bcc_md_factor=args.bcc_md_factor,
                                         has_win=has_win, var_win=var_win,
                                         fast_react=fast_react, mi=mi, int_multi=int_multi, ewma_gain=ewma_gain,
                                         kmax_map=kmax_map, kmin_map=kmin_map, pmax_map=pmax_map)

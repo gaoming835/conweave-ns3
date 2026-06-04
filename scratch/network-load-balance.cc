@@ -141,6 +141,8 @@ bool rate_bound = true;
 bool enable_bcc = false;
 double bcc_u = 0.9;
 double bcc_s = 1.0;
+double bcc_control_period = 55.0;
+double bcc_md_factor = 0.1;
 unordered_map<uint64_t, uint32_t> rate2kmax, rate2kmin;
 unordered_map<uint64_t, double> rate2pmax;
 unordered_map<uint32_t, Ptr<SwitchNode>> idxNodeToR;  // Id -> Ptr
@@ -1173,6 +1175,12 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("BCC_S") == 0) {
                 conf >> bcc_s;
                 std::cerr << "BCC_S\t\t\t" << bcc_s << "\n";
+            } else if (key.compare("BCC_CONTROL_PERIOD") == 0) {
+                conf >> bcc_control_period;
+                std::cerr << "BCC_CONTROL_PERIOD\t\t" << bcc_control_period << "\n";
+            } else if (key.compare("BCC_MD_FACTOR") == 0) {
+                conf >> bcc_md_factor;
+                std::cerr << "BCC_MD_FACTOR\t\t" << bcc_md_factor << "\n";
             } else if (key.compare("LOAD") == 0) {
                 double v;
                 conf >> v;
@@ -1522,6 +1530,8 @@ int main(int argc, char *argv[]) {
             rdmaHw->SetAttribute("TargetUtil", DoubleValue(u_target));
             rdmaHw->SetAttribute("RateBound", BooleanValue(rate_bound));
             rdmaHw->SetAttribute("DctcpRateAI", DataRateValue(DataRate(dctcp_rate_ai)));
+            rdmaHw->SetAttribute("BccControlPeriod", DoubleValue(bcc_control_period));
+            rdmaHw->SetAttribute("BccGentleMdFactor", DoubleValue(bcc_md_factor));
             rdmaHw->SetAttribute("IrnEnable", BooleanValue(enable_irn));
             // topo2bdpMap (e.g., longest BDP 25000: 8us * 25Gbps)
             rdmaHw->SetAttribute("IrnRtoHigh", TimeValue(MicroSeconds(320)));  // 1930

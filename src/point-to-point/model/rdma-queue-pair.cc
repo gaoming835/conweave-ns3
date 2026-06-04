@@ -68,6 +68,16 @@ RdmaQueuePair::RdmaQueuePair(uint16_t pg, Ipv4Address _sip, Ipv4Address _dip, ui
     dctcp.m_ecnCnt = 0;
     dctcp.m_batchSizeOfAlpha = 0;
 
+    bcc.m_enabled = false;
+    bcc.m_mode = 1;
+    bcc.m_lastState = 0;
+    bcc.m_inflightBound = 0;
+    bcc.m_resumeTime = 0;
+    bcc.m_lastControlTime = 0;
+    bcc.m_ackedBytes = 0;
+    bcc.m_lastAckedBytes = 0;
+    bcc.m_arrivalRate = DataRate(0);
+
     irn.m_enabled = false;
     irn.m_highest_ack = 0;
     irn.m_max_seq = 0;
@@ -137,6 +147,7 @@ bool RdmaQueuePair::IsWinBound() {
 }
 
 uint64_t RdmaQueuePair::GetWin() {
+    if (bcc.m_enabled && bcc.m_inflightBound > 0) return bcc.m_inflightBound;
     if (m_win == 0) return 0;
     uint64_t w;
     if (m_var_win) {

@@ -116,6 +116,23 @@ class RdmaQueuePair : public Object {
     } dctcp;
 
     struct {
+        enum Mode : uint8_t {
+            TCM = 0,
+            PCM = 1,
+        };
+
+        bool m_enabled;
+        uint8_t m_mode;
+        uint8_t m_lastState;
+        uint64_t m_inflightBound;
+        uint64_t m_resumeTime;
+        uint64_t m_lastControlTime;
+        uint64_t m_ackedBytes;
+        uint64_t m_lastAckedBytes;
+        DataRate m_arrivalRate;
+    } bcc;
+
+    struct {
         bool m_enabled;
         uint32_t m_bdp;          // m_irn_maxAck_
         uint32_t m_highest_ack;  // m_irn_maxAck_

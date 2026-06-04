@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include "qbb-net-device.h"
+#include "bcc-tag.h"
 #include "rdma-queue-pair.h"
 
 namespace ns3 {
@@ -178,6 +179,21 @@ class RdmaHw : public Object {
      *********************/
     DataRate m_dctcp_rai;
     void HandleAckDctcp(Ptr<RdmaQueuePair> qp, Ptr<Packet> p, CustomHeader &ch);
+
+    /**********************
+     * BCC
+     *********************/
+    double m_bccControlPeriod;
+    double m_bccGentleMdFactor;
+    void HandleAckBcc(Ptr<RdmaQueuePair> qp, Ptr<Packet> p, CustomHeader &ch, bool cnp);
+    void HandleBccTransient(Ptr<RdmaQueuePair> qp, const BccTag &tag);
+    void HandleBccPersistent(Ptr<RdmaQueuePair> qp, uint8_t state, bool cnp);
+    void PauseBcc(Ptr<RdmaQueuePair> qp, Time pauseTime);
+    void SetBccInflightBound(Ptr<RdmaQueuePair> qp, DataRate rate);
+    DataRate ClampBccRate(Ptr<RdmaQueuePair> qp, double bitRate) const;
+    DataRate EstimateBccArrivalRate(Ptr<RdmaQueuePair> qp);
+    void SyncBccPersistentController(Ptr<RdmaQueuePair> qp);
+    void BccPersistentCnp(Ptr<RdmaQueuePair> qp);
 
     /**********************
      * IRN
