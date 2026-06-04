@@ -62,6 +62,7 @@ class SwitchMmu : public Object {
 
     uint32_t GetUsedBufferTotal();
     uint32_t GetEgressQueueBytes(uint32_t port, uint32_t qIndex) const;
+    uint32_t GetEgressPortBytes(uint32_t port) const;
 
     void SetDynamicThreshold(bool value);
     bool GetDynamicThreshold(void) const { return m_dynamicth; }

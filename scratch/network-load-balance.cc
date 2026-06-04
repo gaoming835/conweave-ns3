@@ -99,6 +99,7 @@ FILE *flow_input_stream = NULL;
 FILE *cnp_output = NULL;
 FILE *qlen_output = NULL;
 FILE *rate_output = NULL;
+FILE *bcc_state_output = NULL;
 FILE *est_error_output = NULL;
 FILE *voq_output = NULL;
 FILE *voq_detail_output = NULL;
@@ -112,6 +113,7 @@ std::string pfc_output_file = "pfc.txt";
 std::string cnp_output_file = "cnp.txt";
 std::string qlen_mon_file = "qlen.txt";
 std::string rate_mon_file = "rate.txt";
+std::string bcc_state_mon_file = "bcc_state.txt";
 std::string voq_mon_file = "voq.txt";
 std::string voq_mon_detail_file = "voq_detail.txt";
 std::string uplink_mon_file = "uplink.txt";
@@ -136,6 +138,9 @@ bool sample_feedback = false;
 double u_target = 0.95;
 uint32_t int_multi = 1;
 bool rate_bound = true;
+bool enable_bcc = false;
+double bcc_u = 0.9;
+double bcc_s = 1.0;
 unordered_map<uint64_t, uint32_t> rate2kmax, rate2kmin;
 unordered_map<uint64_t, double> rate2pmax;
 unordered_map<uint32_t, Ptr<SwitchNode>> idxNodeToR;  // Id -> Ptr
@@ -364,6 +369,35 @@ void switch_port_rate_monitoring(FILE *fout) {
 
     if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
         Simulator::Schedule(NanoSeconds(switch_mon_interval), &switch_port_rate_monitoring, fout);
+    }
+}
+
+/**
+ * @brief BCC switch-side state monitor.
+ * Output: time_ns,switch_id,out_dev,queue_len,last_queue_len,queue_slope,link_utilization,state.
+ */
+void bcc_state_monitoring(FILE *fout) {
+    if (!enable_bcc) {
+        return;
+    }
+
+    uint64_t now = Simulator::Now().GetNanoSeconds();
+    for (uint32_t i = 0; i < Settings::node_num; i++) {
+        if (n.Get(i)->GetNodeType() != 1) {
+            continue;
+        }
+        Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(n.Get(i));
+        for (uint32_t port = 1; port < sw->GetNDevices(); port++) {
+            const BccPortState &state = sw->GetBccPortState(port);
+            fprintf(fout, "%lu,%u,%u,%u,%u,%.6f,%.6f,%s\n", now, i, port, state.queue_len,
+                    state.last_queue_len, state.queue_slope, state.link_utilization,
+                    SwitchNode::BccStateToString(state.state));
+        }
+    }
+    fflush(fout);
+
+    if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
+        Simulator::Schedule(NanoSeconds(switch_mon_interval), &bcc_state_monitoring, fout);
     }
 }
 
@@ -1097,6 +1131,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("RATE_MON_FILE") == 0) {
                 conf >> rate_mon_file;
                 std::cerr << "RATE_MON_FILE\t\t\t\t" << rate_mon_file << '\n';
+            } else if (key.compare("BCC_STATE_MON_FILE") == 0) {
+                conf >> bcc_state_mon_file;
+                std::cerr << "BCC_STATE_MON_FILE\t\t\t\t" << bcc_state_mon_file << '\n';
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';
@@ -1125,6 +1162,17 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 sample_feedback = v;
                 std::cerr << "SAMPLE_FEEDBACK\t\t\t\t" << sample_feedback << '\n';
+            } else if (key.compare("ENABLE_BCC") == 0) {
+                bool v;
+                conf >> v;
+                enable_bcc = v;
+                std::cerr << "ENABLE_BCC\t\t" << enable_bcc << "\n";
+            } else if (key.compare("BCC_U") == 0) {
+                conf >> bcc_u;
+                std::cerr << "BCC_U\t\t\t" << bcc_u << "\n";
+            } else if (key.compare("BCC_S") == 0) {
+                conf >> bcc_s;
+                std::cerr << "BCC_S\t\t\t" << bcc_s << "\n";
             } else if (key.compare("LOAD") == 0) {
                 double v;
                 conf >> v;
@@ -1225,6 +1273,9 @@ int main(int argc, char *argv[]) {
             Ptr<SwitchNode> sw = CreateObject<SwitchNode>();
             n.Add(sw);
             sw->SetAttribute("EcnEnabled", BooleanValue(enable_qcn));
+            sw->SetAttribute("BccMarkingEnabled", BooleanValue(enable_bcc));
+            sw->SetAttribute("BccUtilizationThreshold", DoubleValue(bcc_u));
+            sw->SetAttribute("BccSlopeThreshold", DoubleValue(bcc_s));
         }
     }
     NS_LOG_INFO("Create nodes.");
@@ -1811,6 +1862,9 @@ int main(int argc, char *argv[]) {
 
     qlen_output = fopen(qlen_mon_file.c_str(), "w");      // common
     rate_output = fopen(rate_mon_file.c_str(), "w");      // common
+    if (enable_bcc) {
+        bcc_state_output = fopen(bcc_state_mon_file.c_str(), "w");
+    }
     uplink_output = fopen(uplink_mon_file.c_str(), "w");  // common
     conn_output = fopen(conn_mon_file.c_str(), "w");      // common
 
@@ -1843,6 +1897,9 @@ int main(int argc, char *argv[]) {
                         voq_detail_output, uplink_output, conn_output, &lb_mode);
     Simulator::Schedule(Seconds(flowgen_start_time), &egress_queue_monitoring, qlen_output);
     Simulator::Schedule(Seconds(flowgen_start_time), &switch_port_rate_monitoring, rate_output);
+    if (enable_bcc) {
+        Simulator::Schedule(Seconds(flowgen_start_time), &bcc_state_monitoring, bcc_state_output);
+    }
 
     //
     // Now, do the actual simulation.

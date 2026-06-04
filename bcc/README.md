@@ -7,6 +7,12 @@ Stage 1 is a DCQCN/ECN baseline on top of the existing RDMA ns-3 simulator.
 It intentionally does not implement BCC yet. The current goal is to keep a
 clean baseline with reproducible topology, workload, CSV metrics, and figures.
 
+Stage 2 adds switch-side BCC egress state detection. Each switch egress port
+maintains queue length, previous queue length, update time, normalized queue
+slope, link utilization, and one state in `TU`, `TC`, `NC`, or `PC`. Data
+packets leaving a switch egress port receive an `ns3::BccTag` with the current
+state and telemetry.
+
 ## Stage 1 outputs
 
 Each run writes the existing raw simulator files under `mix/output/<run_id>/`
@@ -45,9 +51,31 @@ all link delays are 1us.
 python3 bcc/run_stage1_baseline.py --testbed fat320 --workload webserver --simul-time 0.1 --netload 40
 ```
 
+## Stage 2 switch-state test
+
+Run from inside the README Docker container:
+
+```sh
+python3 bcc/run_stage2_switch_state.py --simul-time 0.01 --netload 20
+```
+
+This writes `mix/output/<run_id>/<run_id>_out_bcc_state.txt` plus
+`stage2_bcc_state_summary.csv` and `figures/bcc_state_fraction.png`.
+The state approximation is:
+
+```text
+if queue_len > K2 or queue_slope > S: TC
+else if queue_len > K1: PC
+else if link_utilization < U: TU
+else: NC
+```
+
+where `U=0.9`, `S=1.0`, `K1=ECN Kmin`, and `K2=ECN Kmax`.
+
 ## Current mismatch notes
 
-- This is a runnable DCQCN/ECN baseline, not the BCC controller.
+- Stage 2 implements switch-side BCC state marking only. The source-side
+  feedback path and bimodal controller are not implemented yet.
 - Egress queue limit is approximated through the existing switch MMU buffer
   model with a 16MB switch buffer. The BCC paper's dynamic threshold details
   are not fully matched yet.

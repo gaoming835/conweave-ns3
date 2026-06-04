@@ -447,6 +447,10 @@ uint32_t SwitchMmu::GetEgressQueueBytes(uint32_t port, uint32_t qIndex) const {
     return m_usedEgressQMinBytes[port][qIndex] + m_usedEgressQSharedBytes[port][qIndex];
 }
 
+uint32_t SwitchMmu::GetEgressPortBytes(uint32_t port) const {
+    return m_usedEgressPortBytes[port];
+}
+
 void SwitchMmu::SetDynamicThreshold(bool v) {
     m_dynamicth = v;
     InitSwitch();

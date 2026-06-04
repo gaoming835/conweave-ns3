@@ -30,7 +30,19 @@ TypeId SwitchNode::GetTypeId(void) {
                           MakeUintegerChecker<uint32_t>())
             .AddAttribute("AckHighPrio", "Set high priority for ACK/NACK or not", UintegerValue(0),
                           MakeUintegerAccessor(&SwitchNode::m_ackHighPrio),
-                          MakeUintegerChecker<uint32_t>());
+                          MakeUintegerChecker<uint32_t>())
+            .AddAttribute("BccMarkingEnabled", "Enable BCC switch-side packet tagging.",
+                          BooleanValue(false),
+                          MakeBooleanAccessor(&SwitchNode::m_bccMarkingEnabled),
+                          MakeBooleanChecker())
+            .AddAttribute("BccUtilizationThreshold", "BCC under-utilization threshold.",
+                          DoubleValue(0.9),
+                          MakeDoubleAccessor(&SwitchNode::m_bccUtilizationThreshold),
+                          MakeDoubleChecker<double>())
+            .AddAttribute("BccSlopeThreshold", "BCC transient congestion slope threshold.",
+                          DoubleValue(1.0),
+                          MakeDoubleAccessor(&SwitchNode::m_bccSlopeThreshold),
+                          MakeDoubleChecker<double>());
     return tid;
 }
 
@@ -40,6 +52,9 @@ SwitchNode::SwitchNode() {
     m_node_type = 1;
     m_isToR = false;
     m_drill_candidate = 2;
+    m_bccMarkingEnabled = false;
+    m_bccUtilizationThreshold = 0.9;
+    m_bccSlopeThreshold = 1.0;
     m_mmu = CreateObject<SwitchMmu>();
     // Conga's Callback for switch functions
     m_mmu->m_congaRouting.SetSwitchSendCallback(MakeCallback(&SwitchNode::DoSwitchSend, this));
@@ -52,6 +67,7 @@ SwitchNode::SwitchNode() {
 
     for (uint32_t i = 0; i < pCnt; i++) {
         m_txBytes[i] = 0;
+        m_bccPortState[i] = BccPortState();
     }
 }
 
@@ -330,11 +346,70 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     m_devices[outDev]->SwitchSend(qIndex, p, ch);
 }
 
+uint8_t SwitchNode::ClassifyBccState(uint32_t ifIndex, const BccPortState &state) const {
+    uint32_t k1 = m_mmu->kmin[ifIndex];
+    uint32_t k2 = m_mmu->kmax[ifIndex];
+    if (state.queue_len > k2 || state.queue_slope > m_bccSlopeThreshold) {
+        return BccTag::TC;
+    }
+    if (state.queue_len > k1) {
+        return BccTag::PC;
+    }
+    if (state.link_utilization < m_bccUtilizationThreshold) {
+        return BccTag::TU;
+    }
+    return BccTag::NC;
+}
+
+void SwitchNode::UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p) {
+    if (!m_bccMarkingEnabled || qIndex == 0) {
+        return;
+    }
+
+    BccPortState &state = m_bccPortState[ifIndex];
+    uint64_t now = Simulator::Now().GetNanoSeconds();
+    uint64_t elapsed = now > state.last_update_time ? now - state.last_update_time : 0;
+    uint32_t queueLen = m_mmu->GetEgressPortBytes(ifIndex);
+    uint64_t txBytes = m_txBytes[ifIndex];
+
+    state.last_queue_len = state.queue_len;
+    state.queue_len = queueLen;
+
+    if (elapsed > 0 && state.last_update_time > 0) {
+        Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(m_devices[ifIndex]);
+        double capacityBytes = dev->GetDataRate().GetBitRate() * (double)elapsed / 8e9;
+        if (capacityBytes > 0) {
+            state.queue_slope = ((double)state.queue_len - (double)state.last_queue_len) /
+                                capacityBytes;
+            state.link_utilization =
+                std::min(1.0, (double)(txBytes - state.last_tx_bytes) / capacityBytes);
+        }
+    }
+
+    state.state = ClassifyBccState(ifIndex, state);
+    state.last_update_time = now;
+    state.last_tx_bytes = txBytes;
+
+    BccTag oldTag;
+    p->RemovePacketTag(oldTag);
+
+    BccTag tag;
+    tag.SetState(state.state);
+    tag.SetSwitchId(GetId());
+    tag.SetEgressPort(ifIndex);
+    tag.SetQueueLen(state.queue_len);
+    tag.SetQueueSlope(state.queue_slope);
+    tag.SetLinkUtilization(state.link_utilization);
+    tag.SetTimestampNs(now);
+    p->AddPacketTag(tag);
+}
+
 void SwitchNode::SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p) {
     FlowIdTag t;
     p->PeekPacketTag(t);
     if (qIndex != 0) {
         uint32_t inDev = t.GetFlowId();
+        UpdateBccStateAndTag(ifIndex, qIndex, p);
         if (inDev != Settings::CONWEAVE_CTRL_DUMMY_INDEV) {
             // NOTE: ConWeave's probe/reply does not need to pass inDev interface,
             // so skip for conweave's queued packets
@@ -426,5 +501,12 @@ uint64_t SwitchNode::GetTxBytesOutDev(uint32_t outdev) {
     assert(outdev < pCnt);
     return m_txBytes[outdev];
 }
+
+const BccPortState &SwitchNode::GetBccPortState(uint32_t outdev) const {
+    assert(outdev < pCnt);
+    return m_bccPortState[outdev];
+}
+
+const char *SwitchNode::BccStateToString(uint8_t state) { return BccTag::StateToString(state); }
 
 } /* namespace ns3 */

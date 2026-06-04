@@ -6,12 +6,23 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "bcc-tag.h"
 #include "qbb-net-device.h"
 #include "switch-mmu.h"
 
 namespace ns3 {
 
 class Packet;
+
+struct BccPortState {
+    uint32_t queue_len{0};
+    uint32_t last_queue_len{0};
+    uint64_t last_update_time{0};
+    double queue_slope{0.0};
+    double link_utilization{0.0};
+    uint8_t state{BccTag::NC};
+    uint64_t last_tx_bytes{0};
+};
 
 class SwitchNode : public Node {
     static const unsigned qCnt = 8;    // Number of queues/priorities used
@@ -27,6 +38,9 @@ class SwitchNode : public Node {
     bool m_ecnEnabled;
     uint32_t m_ccMode;
     uint32_t m_ackHighPrio;  // set high priority for ACK/NACK
+    bool m_bccMarkingEnabled;
+    double m_bccUtilizationThreshold;
+    double m_bccSlopeThreshold;
 
    private:
     int GetOutDev(Ptr<Packet>, CustomHeader &ch);
@@ -38,6 +52,8 @@ class SwitchNode : public Node {
 
     /* Sending packet to Egress port */
     void DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, uint32_t qIndex);
+    void UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p);
+    uint8_t ClassifyBccState(uint32_t ifIndex, const BccPortState &state) const;
 
     /*----- Load balancer -----*/
     // Flow ECMP (lb_mode = 0)
@@ -71,6 +87,11 @@ class SwitchNode : public Node {
     bool SwitchReceiveFromDevice(Ptr<NetDevice> device, Ptr<Packet> packet, CustomHeader &ch);
     void SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p);
     uint64_t GetTxBytesOutDev(uint32_t outdev);
+    const BccPortState &GetBccPortState(uint32_t outdev) const;
+    static const char *BccStateToString(uint8_t state);
+
+   private:
+    BccPortState m_bccPortState[pCnt];
 };
 
 } /* namespace ns3 */

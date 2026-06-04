@@ -28,6 +28,7 @@ FCT_OUTPUT_FILE mix/output/{id}/{id}_out_fct.txt
 PFC_OUTPUT_FILE mix/output/{id}/{id}_out_pfc.txt
 QLEN_MON_FILE mix/output/{id}/{id}_out_qlen.txt
 RATE_MON_FILE mix/output/{id}/{id}_out_rate.txt
+BCC_STATE_MON_FILE mix/output/{id}/{id}_out_bcc_state.txt
 VOQ_MON_FILE mix/output/{id}/{id}_out_voq.txt
 VOQ_MON_DETAIL_FILE mix/output/{id}/{id}_out_voq_per_dst.txt
 UPLINK_MON_FILE mix/output/{id}/{id}_out_uplink.txt
@@ -81,6 +82,9 @@ MULTI_RATE 0
 SAMPLE_FEEDBACK 0
 
 ENABLE_QCN 1
+ENABLE_BCC {enable_bcc}
+BCC_U {bcc_u}
+BCC_S {bcc_s}
 USE_DYNAMIC_PFC_THRESHOLD 1
 PACKET_PAYLOAD_SIZE 1000
 
@@ -198,6 +202,12 @@ def main():
                         type=float, default=1, help="DCQCN alpha resume interval Ti in us (default preserves existing config: 1)")
     parser.add_argument('--dcqcn_td_us', dest='dcqcn_td_us', action='store',
                         type=float, default=4, help="DCQCN rate decrease interval Td in us (default preserves existing config: 4)")
+    parser.add_argument('--enable_bcc', dest='enable_bcc', action='store',
+                        type=int, default=0, help="enable BCC switch-side packet tagging (default: 0)")
+    parser.add_argument('--bcc_u', dest='bcc_u', action='store',
+                        type=float, default=0.9, help="BCC TU utilization threshold (default: 0.9)")
+    parser.add_argument('--bcc_s', dest='bcc_s', action='store',
+                        type=float, default=1.0, help="BCC TC queue-slope threshold (default: 1.0)")
 
     # #### CONWEAVE PARAMETERS ####
     # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
@@ -429,6 +439,9 @@ def main():
                                         ai=ai, hai=hai, dctcp_ai=dctcp_ai,
                                         alpha_resume_interval=args.dcqcn_ti_us,
                                         rate_decrease_interval=args.dcqcn_td_us,
+                                        enable_bcc=args.enable_bcc,
+                                        bcc_u=args.bcc_u,
+                                        bcc_s=args.bcc_s,
                                         has_win=has_win, var_win=var_win,
                                         fast_react=fast_react, mi=mi, int_multi=int_multi, ewma_gain=ewma_gain,
                                         kmax_map=kmax_map, kmin_map=kmin_map, pmax_map=pmax_map)
