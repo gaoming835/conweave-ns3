@@ -443,6 +443,10 @@ void SwitchMmu::SetBroadcomParams(
 
 uint32_t SwitchMmu::GetUsedBufferTotal() { return m_usedTotalBytes; }
 
+uint32_t SwitchMmu::GetEgressQueueBytes(uint32_t port, uint32_t qIndex) const {
+    return m_usedEgressQMinBytes[port][qIndex] + m_usedEgressQSharedBytes[port][qIndex];
+}
+
 void SwitchMmu::SetDynamicThreshold(bool v) {
     m_dynamicth = v;
     InitSwitch();

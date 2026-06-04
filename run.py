@@ -20,13 +20,14 @@ MAX_RAND_RANGE = 1000000000
 
 # config template
 config_template = """TOPOLOGY_FILE config/{topo}.txt
-FLOW_FILE config/{flow}.txt
+FLOW_FILE {flow_file_path}
 
 FLOW_INPUT_FILE mix/output/{id}/{id}_in.txt
 CNP_OUTPUT_FILE mix/output/{id}/{id}_out_cnp.txt
 FCT_OUTPUT_FILE mix/output/{id}/{id}_out_fct.txt
 PFC_OUTPUT_FILE mix/output/{id}/{id}_out_pfc.txt
 QLEN_MON_FILE mix/output/{id}/{id}_out_qlen.txt
+RATE_MON_FILE mix/output/{id}/{id}_out_rate.txt
 VOQ_MON_FILE mix/output/{id}/{id}_out_voq.txt
 VOQ_MON_DETAIL_FILE mix/output/{id}/{id}_out_voq_per_dst.txt
 UPLINK_MON_FILE mix/output/{id}/{id}_out_uplink.txt
@@ -52,8 +53,8 @@ CONWEAVE_PATH_PAUSE_TIME {cwh_path_pause_time}
 CONWEAVE_EXTRA_VOQ_FLUSH_TIME {cwh_extra_voq_flush_time}
 CONWEAVE_DEFAULT_VOQ_WAITING_TIME {cwh_default_voq_waiting_time}
 
-ALPHA_RESUME_INTERVAL 1
-RATE_DECREASE_INTERVAL 4
+ALPHA_RESUME_INTERVAL {alpha_resume_interval}
+RATE_DECREASE_INTERVAL {rate_decrease_interval}
 CLAMP_TARGET_RATE 0
 RP_TIMER 300 
 FAST_RECOVERY_TIMES 1
@@ -112,9 +113,45 @@ lb_modes = {
 topo2bdp = {
     "leaf_spine_128_100G_OS2": 104000,  # 2-tier -> all 100Gbps
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100Gbps
+    "bcc_single_switch_5_25G_OS1": 14500,  # 5 hosts, one 25Gbps bottleneck
+    "bcc_fat_320_25G_400G_OS1": 39750,  # 320 hosts, 25Gbps access, 400Gbps fabric
 }
 
 FLOWGEN_DEFAULT_TIME = 2.0  # see /traffic_gen/traffic_gen.py::base_t
+
+
+def get_topology_link_rates_bps(topo):
+    rates = set()
+    with open("config/{topo}.txt".format(topo=topo), 'r') as f_topo:
+        first_line = f_topo.readline().split(" ")
+        n_link = int(first_line[2])
+        f_topo.readline()  # switch IDs
+        for i, line in enumerate(f_topo.readlines()):
+            if i >= n_link:
+                break
+            parsed = line.split(" ")
+            if len(parsed) <= 2:
+                continue
+            rate = parsed[2]
+            if rate.endswith("Gbps"):
+                rates.add(int(rate.replace("Gbps", "")) * 1000000000)
+            else:
+                raise Exception("Unsupported topology link rate format: {}".format(rate))
+    return sorted(rates)
+
+
+def build_threshold_map(rates, value):
+    fields = [str(len(rates))]
+    for rate in rates:
+        fields += [str(rate), str(value)]
+    return " ".join(fields)
+
+
+def build_pmax_map(rates, value):
+    fields = [str(len(rates))]
+    for rate in rates:
+        fields += [str(rate), "{:.2f}".format(value)]
+    return " ".join(fields)
 
 
 def main():
@@ -149,6 +186,18 @@ def main():
                         type=int, default=0, help="enforce to use window scheme (default: 0)")
     parser.add_argument('--sw_monitoring_interval', dest='sw_monitoring_interval', action='store',
                         type=int, default=10000, help="interval of sampling statistics for queue status (default: 10000ns)")
+    parser.add_argument('--flow_file', dest='flow_file', action='store',
+                        default=None, help="use an existing flow trace instead of generating one")
+    parser.add_argument('--ecn_kmin_kb', dest='ecn_kmin_kb', action='store',
+                        type=int, default=100, help="ECN Kmin in KB before SwitchMmu byte conversion (default: 100)")
+    parser.add_argument('--ecn_kmax_kb', dest='ecn_kmax_kb', action='store',
+                        type=int, default=400, help="ECN Kmax in KB before SwitchMmu byte conversion (default: 400)")
+    parser.add_argument('--ecn_pmax', dest='ecn_pmax', action='store',
+                        type=float, default=0.2, help="ECN max marking probability (default: 0.2)")
+    parser.add_argument('--dcqcn_ti_us', dest='dcqcn_ti_us', action='store',
+                        type=float, default=1, help="DCQCN alpha resume interval Ti in us (default preserves existing config: 1)")
+    parser.add_argument('--dcqcn_td_us', dest='dcqcn_td_us', action='store',
+                        type=float, default=4, help="DCQCN rate decrease interval Td in us (default preserves existing config: 4)")
 
     # #### CONWEAVE PARAMETERS ####
     # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
@@ -190,7 +239,10 @@ def main():
     # get over-subscription ratio from topoogy name
 
     netload = args.netload
-    oversub = int(topo.replace("\n", "").split("OS")[-1].replace(".txt", ""))
+    if "OS" in topo:
+        oversub = int(topo.replace("\n", "").split("OS")[-1].replace(".txt", ""))
+    else:
+        oversub = 1
     assert (int(args.netload) % oversub == 0)
     hostload = int(args.netload) / oversub
     assert (hostload > 0)
@@ -216,9 +268,18 @@ def main():
     assert (hostload >= 0 and hostload < 100)
     flow = "L_{load:.2f}_CDF_{cdf}_N_{n_host}_T_{time}ms_B_{bw}_flow".format(
         load=hostload, cdf=args.cdf, n_host=n_host, time=int(float(args.simul_time)*1000), bw=bw)
+    if args.flow_file:
+        flow_file_path = args.flow_file
+        flow = os.path.splitext(os.path.basename(args.flow_file))[0]
+        print("Use existing input traffic file: {}".format(flow_file_path))
+    else:
+        flow_file_path = "config/{flow}.txt".format(flow=flow)
 
     # check the file exists
-    if (exists(os.getcwd() + "/config/" + flow + ".txt")):
+    if args.flow_file:
+        if not exists(flow_file_path):
+            raise Exception("Input traffic file does not exist: {}".format(flow_file_path))
+    elif (exists(os.getcwd() + "/config/" + flow + ".txt")):
         print("Input traffic file with load:{load:.2f}, cdf:{cdf}, n_host:{n_host} already exists".format(
             load=hostload, cdf=cdf, n_host=n_host))
     else:  # make the input traffic file
@@ -338,12 +399,10 @@ def main():
     print("1BDP = {}".format(bdp))
 
     # DCQCN parameters (NOTE: HPCC's 400KB/1600KB is too large, although used in Microsoft)
-    kmax_map = "6 %d %d %d %d %d %d %d %d %d %d %d %d" % (
-        bw*200000000, 400, bw*500000000, 400, bw*1000000000, 400, bw*2*1000000000, 400, bw*2500000000, 400, bw*4*1000000000, 400)
-    kmin_map = "6 %d %d %d %d %d %d %d %d %d %d %d %d" % (
-        bw*200000000, 100, bw*500000000, 100, bw*1000000000, 100, bw*2*1000000000, 100, bw*2500000000, 100, bw*4*1000000000, 100)
-    pmax_map = "6 %d %d %d %d %d %.2f %d %.2f %d %.2f %d %.2f" % (
-        bw*200000000, 0.2, bw*500000000, 0.2, bw*1000000000, 0.2, bw*2*1000000000, 0.2, bw*2500000000, 0.2, bw*4*1000000000, 0.2)
+    topology_rates = get_topology_link_rates_bps(topo)
+    kmax_map = build_threshold_map(topology_rates, args.ecn_kmax_kb)
+    kmin_map = build_threshold_map(topology_rates, args.ecn_kmin_kb)
+    pmax_map = build_pmax_map(topology_rates, args.ecn_pmax)
 
     # queue monitoring
     qlen_mon_start = flowgen_start_time
@@ -359,6 +418,7 @@ def main():
         ewma_gain = 0.00390625
 
         config = config_template.format(id=config_ID, topo=topo, flow=flow,
+                                        flow_file_path=flow_file_path,
                                         qlen_mon_start=qlen_mon_start, qlen_mon_end=qlen_mon_end, flowgen_start_time=flowgen_start_time,
                                         flowgen_stop_time=flowgen_stop_time, sw_monitoring_interval=sw_monitoring_interval,
                                         load=netload, buffer_size=buffer, lb_mode=lb_mode, cwh_tx_expiry_time=cwh_tx_expiry_time,
@@ -367,6 +427,8 @@ def main():
                                         enabled_pfc=enabled_pfc, enabled_irn=enabled_irn,
                                         cc_mode=cc_mode,
                                         ai=ai, hai=hai, dctcp_ai=dctcp_ai,
+                                        alpha_resume_interval=args.dcqcn_ti_us,
+                                        rate_decrease_interval=args.dcqcn_td_us,
                                         has_win=has_win, var_win=var_win,
                                         fast_react=fast_react, mi=mi, int_multi=int_multi, ewma_gain=ewma_gain,
                                         kmax_map=kmax_map, kmin_map=kmin_map, pmax_map=pmax_map)
@@ -390,8 +452,10 @@ def main():
         history.write("\n")
 
     print(run_command)
-    os.system("./waf --run 'scratch/network-load-balance {config_name}' > {output_log} 2>&1".format(
+    ret = os.system("./waf --run 'scratch/network-load-balance {config_name}' > {output_log} 2>&1".format(
         config_name=config_name, output_log=output_log))
+    if ret != 0:
+        raise RuntimeError("simulation failed; inspect {}".format(output_log))
 
     ####################################################
     #                 Analyze the output FCT           #
@@ -405,8 +469,10 @@ def main():
     print("Analyzing output FCT...")
     print("python3 fctAnalysis.py -id {config_ID} -dir {dir} -bdp {bdp} -sT {fct_analysis_time_limit_begin} -fT {fct_analysistime_limit_end} > /dev/null 2>&1".format(
         config_ID=config_ID, dir=os.getcwd(), bdp=bdp, fct_analysis_time_limit_begin=fct_analysis_time_limit_begin, fct_analysistime_limit_end=fct_analysistime_limit_end))
-    os.system("python3 fctAnalysis.py -id {config_ID} -dir {dir} -bdp {bdp} -sT {fct_analysis_time_limit_begin} -fT {fct_analysistime_limit_end} > /dev/null 2>&1".format(
+    ret = os.system("python3 fctAnalysis.py -id {config_ID} -dir {dir} -bdp {bdp} -sT {fct_analysis_time_limit_begin} -fT {fct_analysistime_limit_end} > /dev/null 2>&1".format(
         config_ID=config_ID, dir=os.getcwd(), bdp=bdp, fct_analysis_time_limit_begin=fct_analysis_time_limit_begin, fct_analysistime_limit_end=fct_analysistime_limit_end))
+    if ret != 0:
+        raise RuntimeError("FCT analysis failed for run {}".format(config_ID))
 
     if lb_mode == 9: # ConWeave Logging
         ################################################################
@@ -428,4 +494,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

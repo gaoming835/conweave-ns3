@@ -1,0 +1,2 @@
+run_id,flow_count,avg_fct_us,p99_fct_us,avg_slowdown,p99_slowdown,avg_active_queue_bytes,p99_active_queue_bytes,max_queue_bytes,avg_aggregate_sending_gbps,avg_aggregate_utilization
+154784488,13365,7.554426711560045,65.18388000000006,1.3350681412219323,10.886922598049402,33847.56862745098,199783.43999999986,226224,32.81027168316831,0.2624821734653465

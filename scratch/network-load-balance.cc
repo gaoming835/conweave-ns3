@@ -97,6 +97,8 @@ FILE *pfc_file = NULL;
 FILE *fct_output = NULL;
 FILE *flow_input_stream = NULL;
 FILE *cnp_output = NULL;
+FILE *qlen_output = NULL;
+FILE *rate_output = NULL;
 FILE *est_error_output = NULL;
 FILE *voq_output = NULL;
 FILE *voq_detail_output = NULL;
@@ -109,6 +111,7 @@ std::string fct_output_file = "fct.txt";
 std::string pfc_output_file = "pfc.txt";
 std::string cnp_output_file = "cnp.txt";
 std::string qlen_mon_file = "qlen.txt";
+std::string rate_mon_file = "rate.txt";
 std::string voq_mon_file = "voq.txt";
 std::string voq_mon_detail_file = "voq_detail.txt";
 std::string uplink_mon_file = "uplink.txt";
@@ -310,6 +313,58 @@ void cnp_freq_monitoring(FILE *fout, Ptr<RdmaHw> rdmahw) {
 
     // recursive callback
     Simulator::Schedule(NanoSeconds(cnp_monitor_bucket), &cnp_freq_monitoring, fout, rdmahw);
+}
+
+/**
+ * @brief Common egress queue monitor for DCQCN/BCC experiments.
+ * Output: time_ns,switch_id,out_dev,q_index,queue_bytes,total_buffer_bytes.
+ */
+void egress_queue_monitoring(FILE *fout) {
+    uint64_t now = Simulator::Now().GetNanoSeconds();
+    for (uint32_t i = 0; i < Settings::node_num; i++) {
+        if (n.Get(i)->GetNodeType() != 1) {
+            continue;
+        }
+        Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(n.Get(i));
+        for (uint32_t port = 1; port < sw->GetNDevices(); port++) {
+            for (uint32_t qIndex = 1; qIndex < SwitchMmu::qCnt; qIndex++) {
+                uint32_t qBytes = sw->m_mmu->GetEgressQueueBytes(port, qIndex);
+                if (qBytes > 0) {
+                    fprintf(fout, "%lu,%u,%u,%u,%u,%u\n", now, i, port, qIndex, qBytes,
+                            sw->m_mmu->GetUsedBufferTotal());
+                }
+            }
+        }
+    }
+    fflush(fout);
+
+    if (Simulator::Now() < Seconds(flowgen_stop_time)) {
+        Simulator::Schedule(NanoSeconds(switch_mon_interval), &egress_queue_monitoring, fout);
+    }
+}
+
+/**
+ * @brief Common switch-port TX monitor.
+ * Output: time_ns,switch_id,out_dev,tx_bytes,rate_bps.
+ */
+void switch_port_rate_monitoring(FILE *fout) {
+    uint64_t now = Simulator::Now().GetNanoSeconds();
+    for (uint32_t i = 0; i < Settings::node_num; i++) {
+        if (n.Get(i)->GetNodeType() != 1) {
+            continue;
+        }
+        Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(n.Get(i));
+        for (uint32_t port = 1; port < sw->GetNDevices(); port++) {
+            Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(sw->GetDevice(port));
+            fprintf(fout, "%lu,%u,%u,%lu,%lu\n", now, i, port, sw->GetTxBytesOutDev(port),
+                    dev->GetDataRate().GetBitRate());
+        }
+    }
+    fflush(fout);
+
+    if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
+        Simulator::Schedule(NanoSeconds(switch_mon_interval), &switch_port_rate_monitoring, fout);
+    }
 }
 
 /**
@@ -1039,6 +1094,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("QLEN_MON_FILE") == 0) {
                 conf >> qlen_mon_file;
                 std::cerr << "QLEN_MON_FILE\t\t\t\t" << qlen_mon_file << '\n';
+            } else if (key.compare("RATE_MON_FILE") == 0) {
+                conf >> rate_mon_file;
+                std::cerr << "RATE_MON_FILE\t\t\t\t" << rate_mon_file << '\n';
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';
@@ -1366,6 +1424,8 @@ int main(int argc, char *argv[]) {
     std::map<std::string, uint32_t> topo2bdpMap;
     topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 104000;  // RTT=8320
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
+    topo2bdpMap[std::string("bcc_single_switch_5_25G_OS1")] = 14500;
+    topo2bdpMap[std::string("bcc_fat_320_25G_400G_OS1")] = 39750;
 
     // topology_file
     bool found_topo2bdpMap = false;
@@ -1749,6 +1809,8 @@ int main(int argc, char *argv[]) {
         voq_detail_output = fopen(voq_mon_detail_file.c_str(), "w");  // specific to ConWeave
     }
 
+    qlen_output = fopen(qlen_mon_file.c_str(), "w");      // common
+    rate_output = fopen(rate_mon_file.c_str(), "w");      // common
     uplink_output = fopen(uplink_mon_file.c_str(), "w");  // common
     conn_output = fopen(conn_mon_file.c_str(), "w");      // common
 
@@ -1779,6 +1841,8 @@ int main(int argc, char *argv[]) {
     }
     Simulator::Schedule(Seconds(flowgen_start_time), &periodic_monitoring, voq_output,
                         voq_detail_output, uplink_output, conn_output, &lb_mode);
+    Simulator::Schedule(Seconds(flowgen_start_time), &egress_queue_monitoring, qlen_output);
+    Simulator::Schedule(Seconds(flowgen_start_time), &switch_port_rate_monitoring, rate_output);
 
     //
     // Now, do the actual simulation.
