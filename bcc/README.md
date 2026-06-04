@@ -97,6 +97,68 @@ mix/output/stage3_compare_<dcqcn_run_id>_<bcc_run_id>/
 
 containing `stage3_compare_metrics.csv` and comparison figures.
 
+## Stage 4 minimal Fig.5-style test
+
+Run from inside the README Docker container:
+
+```sh
+python3 bcc/run_stage4_minimal.py --simul-time 0.06 --nic-gbps 25 --transient-time-us 20000
+```
+
+This creates a 1-switch/5-server topology, starts four long-lived flows from
+servers `0..3` to server `4`, and injects a transient incast to server `4`.
+It runs DCQCN and BCC on the same trace and writes the required time series:
+
+```text
+mix/output/<run_id>/rate-vs-time.csv
+mix/output/<run_id>/queue-vs-time.csv
+mix/output/stage4_minimal_<dcqcn_run_id>_<bcc_run_id>/rate-vs-time.csv
+mix/output/stage4_minimal_<dcqcn_run_id>_<bcc_run_id>/queue-vs-time.csv
+```
+
+`rate-vs-time.csv` uses a sender-side monitor that sums active QP `m_rate`
+values, matching the Fig.5 aggregate sending-rate view more closely than
+bottleneck egress throughput. `queue-vs-time.csv` tracks the bottleneck switch
+egress queue toward server `4`.
+
+## Stage 5 Fat-Tree experiments
+
+Run the 320-server Fat-Tree suite from inside the README Docker container:
+
+```sh
+python3 bcc/run_stage5_fattree.py --duration 0.01 --load 0.01 --max-background-flows 20000
+```
+
+This generates and runs:
+
+- RPC workload.
+- WebServer workload.
+- RPC background traffic plus repeated incast events.
+- DCQCN and BCC on the same workload traces.
+
+The run writes:
+
+```text
+mix/output/stage5_fattree/stage5_summary.csv
+mix/output/stage5_fattree/stage5_runs.csv
+mix/output/stage5_fattree/figures/
+```
+
+`stage5_summary.csv` includes average FCT slowdown, 99p FCT slowdown, average
+and 99p incast RCT slowdown, queue occupancy, link utilization, and convergence
+time. To add BCC parameter sensitivity runs for `K1`, `K2`, `S`, and `U`, append:
+
+```sh
+--include-sensitivity
+```
+
+For a fast wiring check before a full run, use a short duration and a small
+flow cap:
+
+```sh
+python3 bcc/run_stage5_fattree.py --workloads rpc --schemes dcqcn --duration 0.006 --load 0.0001 --max-background-flows 100 --output-dir mix/output/stage5_smoke
+```
+
 ## Current mismatch notes
 
 - Stage 2 implements switch-side BCC state marking only. The source-side
@@ -107,6 +169,12 @@ containing `stage3_compare_metrics.csv` and comparison figures.
   arrival rate; it does not yet reproduce every timing detail from the paper.
 - Stage 3's PCM is a gentle DCQCN-style controller rather than a line-for-line
   implementation of the BCC prototype.
+- Stage 4 is a minimal qualitative reproduction target. It focuses on the
+  Fig.5-style aggregate sender-rate and bottleneck queue behavior, not full
+  paper-scale FCT evaluation.
+- Stage 5 provides the large-scale experiment harness and metrics. Full
+  paper-level confidence still requires running longer durations, multiple
+  seeds, and comparing against the paper's exact traffic distributions.
 - Egress queue limit is approximated through the existing switch MMU buffer
   model with a 16MB switch buffer. The BCC paper's dynamic threshold details
   are not fully matched yet.

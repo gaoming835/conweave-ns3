@@ -1,0 +1,2 @@
+run_id,scheme,workload,k1_kb,k2_kb,s,u,flow_count,avg_fct_slowdown,p99_fct_slowdown,avg_rct_slowdown,p99_rct_slowdown,avg_queue_bytes,p99_queue_bytes,max_queue_bytes,avg_link_utilization,p99_link_utilization,convergence_time_us
+410470309,bcc,incast-mix,5.0,200.0,1.0,0.9,460,5.4077514895824725,20.964343714332287,24.038760802217514,29.59536931354965,146415.6923076923,433872.0,433872,0.0002368429481733219,0.00040800000000000005,950.0

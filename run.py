@@ -28,6 +28,7 @@ FCT_OUTPUT_FILE mix/output/{id}/{id}_out_fct.txt
 PFC_OUTPUT_FILE mix/output/{id}/{id}_out_pfc.txt
 QLEN_MON_FILE mix/output/{id}/{id}_out_qlen.txt
 RATE_MON_FILE mix/output/{id}/{id}_out_rate.txt
+SOURCE_RATE_MON_FILE mix/output/{id}/{id}_out_source_rate.txt
 BCC_STATE_MON_FILE mix/output/{id}/{id}_out_bcc_state.txt
 VOQ_MON_FILE mix/output/{id}/{id}_out_voq.txt
 VOQ_MON_DETAIL_FILE mix/output/{id}/{id}_out_voq_per_dst.txt
@@ -121,7 +122,9 @@ topo2bdp = {
     "leaf_spine_128_100G_OS2": 104000,  # 2-tier -> all 100Gbps
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100Gbps
     "bcc_single_switch_5_25G_OS1": 14500,  # 5 hosts, one 25Gbps bottleneck
-    "bcc_fat_320_25G_400G_OS1": 39750,  # 320 hosts, 25Gbps access, 400Gbps fabric
+    "bcc_stage4_single_switch_5_10G_OS1": 5800,
+    "bcc_stage4_single_switch_5_25G_OS1": 14500,
+    "bcc_fat_320_25G_400G_OS1": 27125,  # 320 hosts, 25Gbps access, 400Gbps fabric
 }
 
 FLOWGEN_DEFAULT_TIME = 2.0  # see /traffic_gen/traffic_gen.py::base_t
@@ -215,6 +218,8 @@ def main():
                         type=float, default=55.0, help="BCC source control period in us (default: 55)")
     parser.add_argument('--bcc_md_factor', dest='bcc_md_factor', action='store',
                         type=float, default=0.1, help="BCC PCM gentle multiplicative decrease factor (default: 0.1)")
+    parser.add_argument('--skip_fct_analysis', dest='skip_fct_analysis', action='store',
+                        type=int, default=0, help="skip fctAnalysis.py after simulation (default: 0)")
 
     # #### CONWEAVE PARAMETERS ####
     # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
@@ -479,6 +484,8 @@ def main():
         config_name=config_name, output_log=output_log))
     if ret != 0:
         raise RuntimeError("simulation failed; inspect {}".format(output_log))
+    if args.skip_fct_analysis:
+        return
 
     ####################################################
     #                 Analyze the output FCT           #

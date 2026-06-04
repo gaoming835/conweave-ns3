@@ -99,6 +99,7 @@ FILE *flow_input_stream = NULL;
 FILE *cnp_output = NULL;
 FILE *qlen_output = NULL;
 FILE *rate_output = NULL;
+FILE *source_rate_output = NULL;
 FILE *bcc_state_output = NULL;
 FILE *est_error_output = NULL;
 FILE *voq_output = NULL;
@@ -113,6 +114,7 @@ std::string pfc_output_file = "pfc.txt";
 std::string cnp_output_file = "cnp.txt";
 std::string qlen_mon_file = "qlen.txt";
 std::string rate_mon_file = "rate.txt";
+std::string source_rate_mon_file = "source_rate.txt";
 std::string bcc_state_mon_file = "bcc_state.txt";
 std::string voq_mon_file = "voq.txt";
 std::string voq_mon_detail_file = "voq_detail.txt";
@@ -371,6 +373,39 @@ void switch_port_rate_monitoring(FILE *fout) {
 
     if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
         Simulator::Schedule(NanoSeconds(switch_mon_interval), &switch_port_rate_monitoring, fout);
+    }
+}
+
+/**
+ * @brief Aggregate sender-side CC rate monitor.
+ * Output: time_ns,aggregate_rate_bps,active_qps,inflight_bytes.
+ */
+void source_rate_monitoring(FILE *fout) {
+    uint64_t now = Simulator::Now().GetNanoSeconds();
+    uint64_t aggregateRate = 0;
+    uint64_t activeQps = 0;
+    uint64_t inflightBytes = 0;
+    for (uint32_t i = 0; i < Settings::node_num; i++) {
+        if (n.Get(i)->GetNodeType() != 0) {
+            continue;
+        }
+        Ptr<RdmaDriver> rdmaDriver = n.Get(i)->GetObject<RdmaDriver>();
+        Ptr<RdmaHw> rdmaHw = rdmaDriver->m_rdma;
+        for (auto qpEntry : rdmaHw->m_qpMap) {
+            Ptr<RdmaQueuePair> qp = qpEntry.second;
+            if (qp->IsFinishedConst()) {
+                continue;
+            }
+            aggregateRate += qp->m_rate.GetBitRate();
+            activeQps++;
+            inflightBytes += qp->GetOnTheFly();
+        }
+    }
+    fprintf(fout, "%lu,%lu,%lu,%lu\n", now, aggregateRate, activeQps, inflightBytes);
+    fflush(fout);
+
+    if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
+        Simulator::Schedule(NanoSeconds(switch_mon_interval), &source_rate_monitoring, fout);
     }
 }
 
@@ -1133,6 +1168,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("RATE_MON_FILE") == 0) {
                 conf >> rate_mon_file;
                 std::cerr << "RATE_MON_FILE\t\t\t\t" << rate_mon_file << '\n';
+            } else if (key.compare("SOURCE_RATE_MON_FILE") == 0) {
+                conf >> source_rate_mon_file;
+                std::cerr << "SOURCE_RATE_MON_FILE\t\t\t\t" << source_rate_mon_file << '\n';
             } else if (key.compare("BCC_STATE_MON_FILE") == 0) {
                 conf >> bcc_state_mon_file;
                 std::cerr << "BCC_STATE_MON_FILE\t\t\t\t" << bcc_state_mon_file << '\n';
@@ -1484,7 +1522,9 @@ int main(int argc, char *argv[]) {
     topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 104000;  // RTT=8320
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
     topo2bdpMap[std::string("bcc_single_switch_5_25G_OS1")] = 14500;
-    topo2bdpMap[std::string("bcc_fat_320_25G_400G_OS1")] = 39750;
+    topo2bdpMap[std::string("bcc_stage4_single_switch_5_10G_OS1")] = 5800;
+    topo2bdpMap[std::string("bcc_stage4_single_switch_5_25G_OS1")] = 14500;
+    topo2bdpMap[std::string("bcc_fat_320_25G_400G_OS1")] = 27125;
 
     // topology_file
     bool found_topo2bdpMap = false;
@@ -1872,6 +1912,7 @@ int main(int argc, char *argv[]) {
 
     qlen_output = fopen(qlen_mon_file.c_str(), "w");      // common
     rate_output = fopen(rate_mon_file.c_str(), "w");      // common
+    source_rate_output = fopen(source_rate_mon_file.c_str(), "w");
     if (enable_bcc) {
         bcc_state_output = fopen(bcc_state_mon_file.c_str(), "w");
     }
@@ -1907,6 +1948,7 @@ int main(int argc, char *argv[]) {
                         voq_detail_output, uplink_output, conn_output, &lb_mode);
     Simulator::Schedule(Seconds(flowgen_start_time), &egress_queue_monitoring, qlen_output);
     Simulator::Schedule(Seconds(flowgen_start_time), &switch_port_rate_monitoring, rate_output);
+    Simulator::Schedule(Seconds(flowgen_start_time), &source_rate_monitoring, source_rate_output);
     if (enable_bcc) {
         Simulator::Schedule(Seconds(flowgen_start_time), &bcc_state_monitoring, bcc_state_output);
     }
