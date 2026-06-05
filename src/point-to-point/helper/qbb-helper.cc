@@ -314,6 +314,8 @@ void QbbHelper::GetTraceFromPacket(TraceFormat &tr, Ptr<QbbNetDevice> dev, Ptr<c
             tr.ack.pg = hdr.ack.pg;
             tr.ack.seq = hdr.ack.seq;
             tr.ack.ts = hdr.ack.ih.GetTs();
+            tr.ack.bccState = hdr.ack.bccState;
+            tr.ack.bccUtil = hdr.ack.bccUtil;
             break;
         case 0xFE:
             tr.pfc.time = hdr.pfc.time;

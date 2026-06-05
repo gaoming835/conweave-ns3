@@ -167,6 +167,12 @@ uint32_t SwitchNode::DoLbConWeave(Ptr<const Packet> p, const CustomHeader &ch,
                                   const std::vector<int> &nexthops) {
     return DoLbFlowECMP(p, ch, nexthops);  // flow ECMP (dummy)
 }
+
+/*------------------Template Load Balancer ----------------*/
+uint32_t SwitchNode::DoLbTemplate(Ptr<const Packet> p, const CustomHeader &ch,
+                                  const std::vector<int> &nexthops) {
+    return DoLbFlowECMP(p, ch, nexthops);  // placeholder until a policy is implemented
+}
 /*----------------------------------*/
 
 void SwitchNode::CheckAndSendPfc(uint32_t inDev, uint32_t qIndex) {
@@ -288,6 +294,8 @@ int SwitchNode::GetOutDev(Ptr<Packet> p, CustomHeader &ch) {
             return DoLbLetflow(p, ch, nexthops);
         case 9:
             return DoLbConWeave(p, ch, nexthops); /** DUMMY: Do ECMP */
+        case 10:
+            return DoLbTemplate(p, ch, nexthops);
         default:
             std::cout << "Unknown lb_mode(" << Settings::lb_mode << ")" << std::endl;
             assert(false);
@@ -346,19 +354,14 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     m_devices[outDev]->SwitchSend(qIndex, p, ch);
 }
 
-uint8_t SwitchNode::ClassifyBccState(uint32_t ifIndex, const BccPortState &state) const {
-    uint32_t k1 = m_mmu->kmin[ifIndex];
-    uint32_t k2 = m_mmu->kmax[ifIndex];
-    if (state.queue_len > k2 || state.queue_slope > m_bccSlopeThreshold) {
-        return BccTag::TC;
-    }
-    if (state.queue_len > k1) {
-        return BccTag::PC;
-    }
-    if (state.link_utilization < m_bccUtilizationThreshold) {
-        return BccTag::TU;
-    }
-    return BccTag::NC;
+static void SetBccEcnBits(Ptr<Packet> p, uint8_t state) {
+    PppHeader ppp;
+    Ipv4Header h;
+    p->RemoveHeader(ppp);
+    p->RemoveHeader(h);
+    h.SetEcn((Ipv4Header::EcnType)BccTag::StateToEcnBits(state));
+    p->AddHeader(h);
+    p->AddHeader(ppp);
 }
 
 void SwitchNode::UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p) {
@@ -390,8 +393,15 @@ void SwitchNode::UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Pac
     state.last_update_time = now;
     state.last_tx_bytes = txBytes;
 
-    BccTag oldTag;
-    p->RemovePacketTag(oldTag);
+    BccTag pathTag;
+    bool hasPathTag = p->PeekPacketTag(pathTag);
+    if (hasPathTag && !BccTag::ShouldReplacePathState(state.state, pathTag.GetState())) {
+        SetBccEcnBits(p, pathTag.GetState());
+        return;
+    }
+    if (hasPathTag) {
+        p->RemovePacketTag(pathTag);
+    }
 
     BccTag tag;
     tag.SetState(state.state);
@@ -402,6 +412,7 @@ void SwitchNode::UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Pac
     tag.SetLinkUtilization(state.link_utilization);
     tag.SetTimestampNs(now);
     p->AddPacketTag(tag);
+    SetBccEcnBits(p, state.state);
 }
 
 void SwitchNode::SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p) {
@@ -416,7 +427,7 @@ void SwitchNode::SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Pack
             m_mmu->RemoveFromIngressAdmission(inDev, qIndex, p->GetSize());
         }
         m_mmu->RemoveFromEgressAdmission(ifIndex, qIndex, p->GetSize());
-        if (m_ecnEnabled) {
+        if (m_ecnEnabled && !m_bccMarkingEnabled) {
             bool egressCongested = m_mmu->ShouldSendCN(ifIndex, qIndex);
             if (egressCongested) {
                 PppHeader ppp;
@@ -505,6 +516,65 @@ uint64_t SwitchNode::GetTxBytesOutDev(uint32_t outdev) {
 const BccPortState &SwitchNode::GetBccPortState(uint32_t outdev) const {
     assert(outdev < pCnt);
     return m_bccPortState[outdev];
+}
+
+uint8_t SwitchNode::ClassifyBccState(uint32_t ifIndex, const BccPortState &state) const {
+    uint32_t k1 = m_mmu->kmin[ifIndex];
+    uint32_t k2 = m_mmu->kmax[ifIndex];
+    return TransitionBccState(state.state, state.queue_len, k1, k2, state.queue_slope,
+                              state.link_utilization, m_bccSlopeThreshold,
+                              m_bccUtilizationThreshold);
+}
+
+uint8_t SwitchNode::TransitionBccState(uint8_t previousState, uint32_t queueLen, uint32_t k1,
+                                       uint32_t k2, double queueSlope, double linkUtilization,
+                                       double slopeThreshold, double utilizationThreshold) {
+    bool aboveK1 = queueLen > k1;
+    bool belowK1 = queueLen < k1;
+    bool aboveK2 = queueLen > k2;
+    bool belowK2 = queueLen < k2;
+    bool risingFast = queueSlope > slopeThreshold;
+    bool fallingBelowTransient = queueSlope < slopeThreshold;
+    bool underUtilized = linkUtilization < utilizationThreshold;
+    bool utilizationRecovered = linkUtilization > utilizationThreshold;
+
+    switch (previousState) {
+        case BccTag::NC:
+            if (aboveK1) {
+                return BccTag::PC;
+            }
+            if (underUtilized) {
+                return BccTag::TU;
+            }
+            return BccTag::NC;
+        case BccTag::PC:
+            if (aboveK2 || risingFast) {
+                return BccTag::TC;
+            }
+            if (belowK1) {
+                return BccTag::NC;
+            }
+            return BccTag::PC;
+        case BccTag::TC:
+            if (fallingBelowTransient && belowK2) {
+                return BccTag::PC;
+            }
+            return BccTag::TC;
+        case BccTag::TU:
+            if (aboveK2 || risingFast) {
+                return BccTag::TC;
+            }
+            if (aboveK1) {
+                return BccTag::PC;
+            }
+            if (utilizationRecovered) {
+                return BccTag::NC;
+            }
+            return BccTag::TU;
+        default:
+            return TransitionBccState(BccTag::NC, queueLen, k1, k2, queueSlope, linkUtilization,
+                                      slopeThreshold, utilizationThreshold);
+    }
 }
 
 const char *SwitchNode::BccStateToString(uint8_t state) { return BccTag::StateToString(state); }

@@ -45,6 +45,12 @@ class BccTag : public Tag {
     void SetTimestampNs(uint64_t timestampNs);
     uint64_t GetTimestampNs(void) const;
 
+    static uint8_t GetStatePriority(uint8_t state);
+    static bool ShouldReplacePathState(uint8_t localState, uint8_t existingPathState);
+    static uint8_t StateToEcnBits(uint8_t state);
+    static uint8_t EcnBitsToState(uint8_t ecnBits);
+    static uint8_t QuantizeUtilization(double utilization);
+    static double DequantizeUtilization(uint8_t quantized);
     static const char *StateToString(uint8_t state);
 
    private:

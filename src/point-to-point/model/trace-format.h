@@ -53,6 +53,8 @@ struct TraceFormat{
 			uint16_t pg;
 			uint32_t seq;
 			uint64_t ts;
+			uint8_t bccState;
+			uint8_t bccUtil;
 		} ack;
 		struct {
 			uint32_t time;

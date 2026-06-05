@@ -72,6 +72,9 @@ class SwitchNode : public Node {
     // ConWeave (lb_mode = 9)
     uint32_t DoLbConWeave(Ptr<const Packet> p, const CustomHeader &ch,
                            const std::vector<int> &nexthops);  // dummy
+    // Template load balancer (lb_mode = 10)
+    uint32_t DoLbTemplate(Ptr<const Packet> p, const CustomHeader &ch,
+                          const std::vector<int> &nexthops);
 
    public:
     // Ptr<BroadcomNode> m_broadcom;
@@ -88,6 +91,9 @@ class SwitchNode : public Node {
     void SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p);
     uint64_t GetTxBytesOutDev(uint32_t outdev);
     const BccPortState &GetBccPortState(uint32_t outdev) const;
+    static uint8_t TransitionBccState(uint8_t previousState, uint32_t queueLen, uint32_t k1,
+                                      uint32_t k2, double queueSlope, double linkUtilization,
+                                      double slopeThreshold, double utilizationThreshold);
     static const char *BccStateToString(uint8_t state);
 
    private:

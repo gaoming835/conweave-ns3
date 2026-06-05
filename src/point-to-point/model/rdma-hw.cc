@@ -231,7 +231,7 @@ void RdmaHw::AddQueuePair(uint64_t size, uint16_t pg, Ipv4Address sip, Ipv4Addre
         qp->tmly.m_curRate = m_bps;
     } else if (m_cc_mode == 10) {
         qp->bcc.m_enabled = true;
-        qp->bcc.m_mode = 1;  // PCM
+        qp->bcc.m_mode = RdmaQueuePair::BCC_PCM;
         qp->bcc.m_lastControlTime = Simulator::Now().GetNanoSeconds();
         qp->bcc.m_arrivalRate = m_bps;
         qp->mlx.m_targetRate = m_bps;
@@ -370,6 +370,16 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
             seqh.SetCnp();
         }
 
+        BccTag bccFeedback;
+        bool hasBccTag = p->PeekPacketTag(bccFeedback);
+        if (m_cc_mode == 10 || hasBccTag) {
+            uint8_t bccState = m_cc_mode == 10 ? BccTag::EcnBitsToState(ecnbits)
+                                               : bccFeedback.GetState();
+            double bccUtilization = hasBccTag ? bccFeedback.GetLinkUtilization()
+                                              : (bccState == BccTag::TU ? 0.5 : 1.0);
+            seqh.SetBccFeedback(bccState, bccUtilization);
+        }
+
         Ptr<Packet> newp =
             Create<Packet>(std::max(60 - 14 - 20 - (int)seqh.GetSerializedSize(), 0));
         newp->AddHeader(seqh);
@@ -387,9 +397,8 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
             if (p->PeekPacketTag(fit)) {
                 newp->AddPacketTag(fit);
             }
-            BccTag bcc;
-            if (p->PeekPacketTag(bcc)) {
-                newp->AddPacketTag(bcc);
+            if (hasBccTag) {
+                newp->AddPacketTag(bccFeedback);
             }
         }
 
@@ -457,7 +466,7 @@ int RdmaHw::ReceiveCnp(Ptr<Packet> p, CustomHeader &ch) {
             qp->tmly.m_curRate = dev->GetDataRate();
         } else if (m_cc_mode == 10) {
             qp->bcc.m_enabled = true;
-            qp->bcc.m_mode = 1;  // PCM
+            qp->bcc.m_mode = RdmaQueuePair::BCC_PCM;
             qp->bcc.m_lastControlTime = Simulator::Now().GetNanoSeconds();
             qp->bcc.m_arrivalRate = dev->GetDataRate();
             qp->mlx.m_targetRate = dev->GetDataRate();
@@ -934,6 +943,9 @@ void RdmaHw::ChangeRate(Ptr<RdmaQueuePair> qp, DataRate new_rate) {
  * Mellanox's version of DCQCN
  *****************************/
 void RdmaHw::UpdateAlphaMlx(Ptr<RdmaQueuePair> q) {
+    if (!BccMlxTimersAllowed(q)) {
+        return;
+    }
 #if PRINT_LOG
 // std::cout << Simulator::Now() << " alpha update:" << m_node->GetId() << ' ' << q->mlx.m_alpha <<
 // ' ' << (int)q->mlx.m_alpha_cnp_arrived << '\n'; printf("%lu alpha update: %08x %08x %u %u
@@ -952,6 +964,9 @@ void RdmaHw::UpdateAlphaMlx(Ptr<RdmaQueuePair> q) {
     ScheduleUpdateAlphaMlx(q);
 }
 void RdmaHw::ScheduleUpdateAlphaMlx(Ptr<RdmaQueuePair> q) {
+    if (!BccMlxTimersAllowed(q)) {
+        return;
+    }
     q->mlx.m_eventUpdateAlpha = Simulator::Schedule(MicroSeconds(m_alpha_resume_interval),
                                                     &RdmaHw::UpdateAlphaMlx, this, q);
 }
@@ -974,6 +989,9 @@ void RdmaHw::cnp_received_mlx(Ptr<RdmaQueuePair> q) {
 }
 
 void RdmaHw::CheckRateDecreaseMlx(Ptr<RdmaQueuePair> q) {
+    if (!BccMlxTimersAllowed(q)) {
+        return;
+    }
     ScheduleDecreaseRateMlx(q, 0);
     if (q->mlx.m_decrease_cnp_arrived) {
 #if PRINT_LOG
@@ -1002,18 +1020,27 @@ void RdmaHw::CheckRateDecreaseMlx(Ptr<RdmaQueuePair> q) {
     }
 }
 void RdmaHw::ScheduleDecreaseRateMlx(Ptr<RdmaQueuePair> q, uint32_t delta) {
+    if (!BccMlxTimersAllowed(q)) {
+        return;
+    }
     q->mlx.m_eventDecreaseRate =
         Simulator::Schedule(MicroSeconds(m_rateDecreaseInterval) + NanoSeconds(delta),
                             &RdmaHw::CheckRateDecreaseMlx, this, q);
 }
 
 void RdmaHw::RateIncEventTimerMlx(Ptr<RdmaQueuePair> q) {
+    if (!BccMlxTimersAllowed(q)) {
+        return;
+    }
     q->mlx.m_rpTimer =
         Simulator::Schedule(MicroSeconds(m_rpgTimeReset), &RdmaHw::RateIncEventTimerMlx, this, q);
     RateIncEventMlx(q);
     q->mlx.m_rpTimeStage++;
 }
 void RdmaHw::RateIncEventMlx(Ptr<RdmaQueuePair> q) {
+    if (!BccMlxTimersAllowed(q)) {
+        return;
+    }
     // check which increase phase: fast recovery, active increase, hyper increase
     if (q->mlx.m_rpTimeStage < m_rpgThreshold) {  // fast recovery
         FastRecoveryMlx(q);
@@ -1396,7 +1423,79 @@ DataRate RdmaHw::ClampBccRate(Ptr<RdmaQueuePair> qp, double bitRate) const {
     return DataRate((uint64_t)bitRate);
 }
 
+bool RdmaHw::ShouldSuppressBccMlxTimer(uint32_t ccMode, bool bccEnabled, uint8_t bccMode) {
+    return ccMode == 10 && bccEnabled && bccMode == RdmaQueuePair::BCC_TCM;
+}
+
+bool RdmaHw::BccMlxTimersAllowed(Ptr<RdmaQueuePair> qp) const {
+    return !ShouldSuppressBccMlxTimer(m_cc_mode, qp->bcc.m_enabled, qp->bcc.m_mode);
+}
+
+void RdmaHw::CancelBccPersistentTimers(Ptr<RdmaQueuePair> qp) {
+    Simulator::Cancel(qp->mlx.m_eventUpdateAlpha);
+    Simulator::Cancel(qp->mlx.m_eventDecreaseRate);
+    Simulator::Cancel(qp->mlx.m_rpTimer);
+    qp->mlx.m_alpha_cnp_arrived = false;
+    qp->mlx.m_decrease_cnp_arrived = false;
+}
+
+void RdmaHw::EnterBccTransientController(Ptr<RdmaQueuePair> qp) {
+    if (qp->bcc.m_mode != RdmaQueuePair::BCC_TCM) {
+        qp->bcc.m_modeTransitions++;
+        qp->bcc.m_lastModeTransitionTime = Simulator::Now().GetNanoSeconds();
+    }
+    qp->bcc.m_mode = RdmaQueuePair::BCC_TCM;
+    qp->mlx.m_targetRate = qp->m_rate;
+    CancelBccPersistentTimers(qp);
+}
+
+void RdmaHw::EnterBccPersistentController(Ptr<RdmaQueuePair> qp) {
+    bool transition = qp->bcc.m_mode != RdmaQueuePair::BCC_PCM;
+    if (qp->bcc.m_mode != RdmaQueuePair::BCC_PCM) {
+        qp->bcc.m_modeTransitions++;
+        qp->bcc.m_lastModeTransitionTime = Simulator::Now().GetNanoSeconds();
+    }
+    qp->bcc.m_mode = RdmaQueuePair::BCC_PCM;
+    qp->mlx.m_targetRate = qp->m_rate;
+    if (transition) {
+        qp->mlx.m_alpha = std::min(1.0, 2.0 * m_bccGentleMdFactor);
+        qp->mlx.m_first_cnp = false;
+        qp->mlx.m_decrease_cnp_arrived = false;
+        qp->mlx.m_alpha_cnp_arrived = false;
+        qp->mlx.m_rpTimeStage = 0;
+    }
+}
+
+uint64_t RdmaHw::ComputeBccPauseNs(uint64_t inflightBytes, DataRate rHat, uint64_t baseRttNs) {
+    double rHatBps = (double)rHat.GetBitRate();
+    if (!std::isfinite(rHatBps) || rHatBps <= 0) {
+        return 0;
+    }
+    double pauseNs = inflightBytes * 8e9 / rHatBps - (double)baseRttNs;
+    if (!std::isfinite(pauseNs) || pauseNs <= 0) {
+        return 0;
+    }
+    return (uint64_t)std::ceil(pauseNs);
+}
+
+uint64_t RdmaHw::ComputeBccInflightBoundBytes(DataRate rHat, uint64_t baseRttNs, uint32_t mtu,
+                                              uint64_t flowSize) {
+    double bytes = rHat.GetBitRate() * (double)baseRttNs / 8e9;
+    uint64_t bound = (uint64_t)std::ceil(std::max(bytes, (double)mtu));
+    return std::min<uint64_t>(bound, std::max<uint64_t>(mtu, flowSize));
+}
+
+DataRate RdmaHw::ComputeBccTuRate(DataRate rHat, double utilization) {
+    double util = std::max(0.05, std::min(1.0, utilization));
+    double bitRate = rHat.GetBitRate() / util;
+    if (!std::isfinite(bitRate) || bitRate <= 0) {
+        bitRate = rHat.GetBitRate();
+    }
+    return DataRate((uint64_t)bitRate);
+}
+
 void RdmaHw::PauseBcc(Ptr<RdmaQueuePair> qp, Time pauseTime) {
+    qp->bcc.m_lastPauseTime = pauseTime > NanoSeconds(0) ? pauseTime.GetNanoSeconds() : 0;
     if (pauseTime <= NanoSeconds(0)) return;
     Time resume = Simulator::Now() + pauseTime;
     if (resume > qp->m_nextAvail) {
@@ -1407,10 +1506,9 @@ void RdmaHw::PauseBcc(Ptr<RdmaQueuePair> qp, Time pauseTime) {
     qp->bcc.m_resumeTime = qp->m_nextAvail.GetNanoSeconds();
 }
 
-void RdmaHw::SetBccInflightBound(Ptr<RdmaQueuePair> qp, DataRate rate) {
-    double bytes = rate.GetBitRate() * (double)qp->m_baseRtt / 8e9;
-    uint64_t bound = (uint64_t)std::ceil(std::max(bytes, (double)m_mtu));
-    qp->bcc.m_inflightBound = std::min<uint64_t>(bound, std::max<uint64_t>(m_mtu, qp->m_size));
+void RdmaHw::SetBccInflightBoundFromRate(Ptr<RdmaQueuePair> qp, DataRate rHat) {
+    qp->bcc.m_inflightBound =
+        ComputeBccInflightBoundBytes(rHat, qp->m_baseRtt, m_mtu, qp->m_size);
 }
 
 DataRate RdmaHw::EstimateBccArrivalRate(Ptr<RdmaQueuePair> qp) {
@@ -1438,11 +1536,7 @@ DataRate RdmaHw::EstimateBccArrivalRate(Ptr<RdmaQueuePair> qp) {
 }
 
 void RdmaHw::SyncBccPersistentController(Ptr<RdmaQueuePair> qp) {
-    qp->mlx.m_targetRate = qp->m_rate;
-    qp->mlx.m_alpha = std::min(1.0, 2.0 * m_bccGentleMdFactor);
-    qp->mlx.m_first_cnp = false;
-    qp->mlx.m_decrease_cnp_arrived = false;
-    qp->mlx.m_alpha_cnp_arrived = false;
+    EnterBccPersistentController(qp);
 
     if (!qp->mlx.m_eventUpdateAlpha.IsRunning()) {
         ScheduleUpdateAlphaMlx(qp);
@@ -1470,42 +1564,45 @@ void RdmaHw::BccPersistentCnp(Ptr<RdmaQueuePair> qp) {
 }
 
 void RdmaHw::HandleBccTransient(Ptr<RdmaQueuePair> qp, const BccTag &tag) {
-    qp->bcc.m_mode = 0;  // TCM
+    EnterBccTransientController(qp);
     DataRate arrivalRate = EstimateBccArrivalRate(qp);
 
     if (tag.GetState() == BccTag::TC) {
         uint64_t inflight = qp->GetOnTheFly();
-        double rHatBps = std::max<double>(arrivalRate.GetBitRate(), m_minRate.GetBitRate());
-        double pauseNs = inflight * 8e9 / rHatBps - (double)qp->m_baseRtt;
-        if (pauseNs > 0) {
-            PauseBcc(qp, NanoSeconds((uint64_t)pauseNs));
-        }
+        DataRate rHat = ClampBccRate(qp, arrivalRate.GetBitRate());
+        qp->bcc.m_lastControlInflight = inflight;
+        qp->bcc.m_lastUtilization = tag.GetLinkUtilization();
+        PauseBcc(qp, NanoSeconds(ComputeBccPauseNs(inflight, rHat, qp->m_baseRtt)));
 
-        double downBps = std::min<double>(qp->m_rate.GetBitRate(), arrivalRate.GetBitRate());
-        if (downBps <= 0 || downBps >= qp->m_rate.GetBitRate()) {
-            downBps = qp->m_rate.GetBitRate() * (1.0 - m_bccGentleMdFactor);
-        }
-        DataRate newRate = ClampBccRate(qp, downBps);
+        DataRate newRate = ClampBccRate(qp, rHat.GetBitRate());
         if (newRate < qp->m_rate) {
             ChangeRate(qp, newRate);
         }
-        SetBccInflightBound(qp, newRate);
+        SetBccInflightBoundFromRate(qp, rHat);
     } else if (tag.GetState() == BccTag::TU) {
         double util = std::max(0.05, std::min(1.0, tag.GetLinkUtilization()));
-        DataRate newRate = ClampBccRate(qp, qp->m_rate.GetBitRate() / util);
+        DataRate rHat = ClampBccRate(qp, arrivalRate.GetBitRate());
+        DataRate adjustedRhat = ClampBccRate(qp, ComputeBccTuRate(rHat, util).GetBitRate());
+        qp->bcc.m_arrivalRate = adjustedRhat;
+        qp->bcc.m_lastControlInflight = qp->GetOnTheFly();
+        qp->bcc.m_lastPauseTime = 0;
+        qp->bcc.m_lastUtilization = util;
+        qp->bcc.m_resumeTime = qp->m_nextAvail.GetNanoSeconds();
+        DataRate newRate = adjustedRhat;
         if (newRate > qp->m_rate) {
             ChangeRate(qp, newRate);
         }
-        SetBccInflightBound(qp, newRate);
+        SetBccInflightBoundFromRate(qp, adjustedRhat);
     }
 }
 
 void RdmaHw::HandleBccPersistent(Ptr<RdmaQueuePair> qp, uint8_t state, bool cnp) {
-    if (qp->bcc.m_mode == 0) {
+    if (qp->bcc.m_mode == RdmaQueuePair::BCC_TCM) {
         SyncBccPersistentController(qp);
+    } else {
+        qp->mlx.m_targetRate = qp->m_rate;
     }
-    qp->bcc.m_mode = 1;  // PCM
-    SetBccInflightBound(qp, qp->m_rate);
+    SetBccInflightBoundFromRate(qp, qp->m_rate);
 
     uint64_t now = Simulator::Now().GetNanoSeconds();
     uint64_t controlNs = (uint64_t)std::max(1.0, m_bccControlPeriod * 1000.0);
@@ -1516,20 +1613,31 @@ void RdmaHw::HandleBccPersistent(Ptr<RdmaQueuePair> qp, uint8_t state, bool cnp)
 
     if ((state == BccTag::PC || cnp) && periodElapsed) {
         BccPersistentCnp(qp);
-        SetBccInflightBound(qp, qp->m_rate);
+        SetBccInflightBoundFromRate(qp, qp->m_rate);
     } else if (state == BccTag::NC && periodElapsed && qp->m_rate < qp->m_max_rate) {
         RateIncEventMlx(qp);
         qp->mlx.m_rpTimeStage++;
-        SetBccInflightBound(qp, qp->m_rate);
+        SetBccInflightBoundFromRate(qp, qp->m_rate);
     }
 }
 
 void RdmaHw::HandleAckBcc(Ptr<RdmaQueuePair> qp, Ptr<Packet> p, CustomHeader &ch, bool cnp) {
-    (void)ch;
     qp->bcc.m_enabled = true;
 
+    BccTag packetTag;
+    bool hasPacketTag = p->PeekPacketTag(packetTag);
+    bool hasHeaderFeedback = ((ch.ack.flags >> qbbHeader::FLAG_BCC_VALID) & 1) != 0;
+
     BccTag tag;
-    if (!p->PeekPacketTag(tag)) {
+    if (hasHeaderFeedback) {
+        if (hasPacketTag) {
+            tag = packetTag;
+        }
+        tag.SetState(ch.ack.bccState);
+        tag.SetLinkUtilization(BccTag::DequantizeUtilization(ch.ack.bccUtil));
+    } else if (hasPacketTag) {
+        tag = packetTag;
+    } else {
         if (cnp) {
             HandleBccPersistent(qp, BccTag::PC, true);
         }

@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <iostream>
 #include "qbb-header.h"
+#include "bcc-tag.h"
 #include "ns3/buffer.h"
 #include "ns3/address-utils.h"
 #include "ns3/log.h"
@@ -12,12 +13,16 @@ namespace ns3 {
 	NS_OBJECT_ENSURE_REGISTERED(qbbHeader);
 
 	qbbHeader::qbbHeader(uint16_t pg)
-		: m_pg(pg), sport(0), dport(0), flags(0), m_seq(0)
+		: m_pg(pg), sport(0), dport(0), flags(0), m_seq(0), m_bcc_state(BccTag::NC),
+		  m_bcc_util(BccTag::QuantizeUtilization(1.0)), m_irn_nack(0), m_irn_nack_size(0),
+		  enable_irn(false)
 	{
 	}
 
 	qbbHeader::qbbHeader()
-		: m_pg(0), sport(0), dport(0), flags(0), m_seq(0)
+		: m_pg(0), sport(0), dport(0), flags(0), m_seq(0), m_bcc_state(BccTag::NC),
+		  m_bcc_util(BccTag::QuantizeUtilization(1.0)), m_irn_nack(0), m_irn_nack_size(0),
+		  enable_irn(false)
 	{}
 
 	qbbHeader::~qbbHeader()
@@ -46,6 +51,11 @@ namespace ns3 {
 	}
 	void qbbHeader::SetCnp(){
 		flags |= 1 << FLAG_CNP;
+	}
+	void qbbHeader::SetBccFeedback(uint8_t state, double utilization){
+		flags |= 1 << FLAG_BCC_VALID;
+		m_bcc_state = state;
+		m_bcc_util = BccTag::QuantizeUtilization(utilization);
 	}
 	void qbbHeader::SetIntHeader(const IntHeader &_ih){
 		ih = _ih;
@@ -81,6 +91,18 @@ namespace ns3 {
 	uint8_t qbbHeader::GetCnp() const{
 		return (flags >> FLAG_CNP) & 1;
 	}
+	bool qbbHeader::HasBccFeedback() const{
+		return ((flags >> FLAG_BCC_VALID) & 1) != 0;
+	}
+	uint8_t qbbHeader::GetBccState() const{
+		return m_bcc_state;
+	}
+	uint8_t qbbHeader::GetBccUtilizationQuantized() const{
+		return m_bcc_util & 0x07;
+	}
+	double qbbHeader::GetBccUtilization() const{
+		return BccTag::DequantizeUtilization(GetBccUtilizationQuantized());
+	}
 	uint32_t qbbHeader::GetIrnNack() const{
 		return m_irn_nack;
 	}
@@ -112,7 +134,7 @@ namespace ns3 {
 	}
 	uint32_t qbbHeader::GetBaseSize() {
 		qbbHeader tmp;
-		return sizeof(tmp.sport) + sizeof(tmp.dport) + sizeof(tmp.flags) + sizeof(tmp.m_pg) + sizeof(tmp.m_seq) + sizeof(tmp.m_irn_nack) + sizeof(tmp.m_irn_nack_size);
+		return sizeof(tmp.sport) + sizeof(tmp.dport) + sizeof(tmp.flags) + sizeof(tmp.m_pg) + sizeof(tmp.m_seq) + sizeof(tmp.m_irn_nack) + sizeof(tmp.m_irn_nack_size) + sizeof(tmp.m_bcc_state) + sizeof(tmp.m_bcc_util);
 	}
 	void qbbHeader::Serialize(Buffer::Iterator start)  const
 	{
@@ -124,6 +146,8 @@ namespace ns3 {
 		i.WriteU32(m_seq);
 		i.WriteU32(m_irn_nack);
 		i.WriteU16(m_irn_nack_size);
+		i.WriteU8(m_bcc_state);
+		i.WriteU8(m_bcc_util);
 
 		// write IntHeader
 		ih.Serialize(i);
@@ -139,6 +163,8 @@ namespace ns3 {
 		m_seq = i.ReadU32();
 		m_irn_nack = i.ReadU32();
 		m_irn_nack_size = i.ReadU16();
+		m_bcc_state = i.ReadU8();
+		m_bcc_util = i.ReadU8();
 
 		// read IntHeader
 		ih.Deserialize(i);

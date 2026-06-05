@@ -30,6 +30,7 @@ QLEN_MON_FILE mix/output/{id}/{id}_out_qlen.txt
 RATE_MON_FILE mix/output/{id}/{id}_out_rate.txt
 SOURCE_RATE_MON_FILE mix/output/{id}/{id}_out_source_rate.txt
 BCC_STATE_MON_FILE mix/output/{id}/{id}_out_bcc_state.txt
+BCC_TCM_MON_FILE mix/output/{id}/{id}_out_bcc_tcm.txt
 VOQ_MON_FILE mix/output/{id}/{id}_out_voq.txt
 VOQ_MON_DETAIL_FILE mix/output/{id}/{id}_out_voq_per_dst.txt
 UPLINK_MON_FILE mix/output/{id}/{id}_out_uplink.txt

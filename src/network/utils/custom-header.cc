@@ -176,7 +176,9 @@ void CustomHeader::Serialize (Buffer::Iterator start) const{
 		  i.WriteU32(ack.seq);
 		  i.WriteU32(ack.irnNack);
 		  i.WriteU16(ack.irnNackSize);
-		  udp.ih.Serialize(i);
+		  i.WriteU8(ack.bccState);
+		  i.WriteU8(ack.bccUtil);
+		  ack.ih.Serialize(i);
 	  }else if (l3Prot == 0xFE){ // PFC
 		  i.WriteU32 (pfc.time);
 		  i.WriteU32 (pfc.qlen);
@@ -314,6 +316,8 @@ CustomHeader::Deserialize (Buffer::Iterator start)
 		  ack.seq = i.ReadU32();
 		  ack.irnNack = i.ReadU32();
 		  ack.irnNackSize = i.ReadU16();
+		  ack.bccState = i.ReadU8();
+		  ack.bccUtil = i.ReadU8();
 		  if (getInt)
 			  ack.ih.Deserialize(i);
 		  l4Size = GetAckSerializedSize();
@@ -333,7 +337,7 @@ uint8_t CustomHeader::GetIpv4EcnBits (void) const{
 }
 
 uint32_t CustomHeader::GetAckSerializedSize(void){
-	return sizeof(ack.sport) + sizeof(ack.dport) + sizeof(ack.flags) + sizeof(ack.pg) + sizeof(ack.seq) + IntHeader::GetStaticSize();
+	return sizeof(ack.sport) + sizeof(ack.dport) + sizeof(ack.flags) + sizeof(ack.pg) + sizeof(ack.seq) + sizeof(ack.irnNack) + sizeof(ack.irnNackSize) + sizeof(ack.bccState) + sizeof(ack.bccUtil) + IntHeader::GetStaticSize();
 }
 
 uint32_t CustomHeader::GetUdpHeaderSize(void){
@@ -345,4 +349,3 @@ uint32_t CustomHeader::GetStaticWholeHeaderSize(void){
 }
 
 } // namespace ns3
-

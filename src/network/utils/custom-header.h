@@ -126,6 +126,8 @@ public:
 		  IntHeader ih;
 		  uint32_t irnNack;
 		  uint16_t irnNackSize;
+		  uint8_t bccState;
+		  uint8_t bccUtil;
 	  } ack;
 	  // PauseHeader
 	  struct {
@@ -145,4 +147,3 @@ public:
 
 
 #endif /* CUSTOM_HEADER_H */
-

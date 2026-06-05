@@ -104,6 +104,11 @@ class RdmaHw : public Object {
     void PktSent(Ptr<RdmaQueuePair> qp, Ptr<Packet> pkt, Time interframeGap);
     void UpdateNextAvail(Ptr<RdmaQueuePair> qp, Time interframeGap, uint32_t pkt_size);
     void ChangeRate(Ptr<RdmaQueuePair> qp, DataRate new_rate);
+    static bool ShouldSuppressBccMlxTimer(uint32_t ccMode, bool bccEnabled, uint8_t bccMode);
+    static uint64_t ComputeBccPauseNs(uint64_t inflightBytes, DataRate rHat, uint64_t baseRttNs);
+    static uint64_t ComputeBccInflightBoundBytes(DataRate rHat, uint64_t baseRttNs, uint32_t mtu,
+                                                 uint64_t flowSize);
+    static DataRate ComputeBccTuRate(DataRate rHat, double utilization);
 
     void HandleTimeout(Ptr<RdmaQueuePair> qp, Time rto);
 
@@ -188,8 +193,12 @@ class RdmaHw : public Object {
     void HandleAckBcc(Ptr<RdmaQueuePair> qp, Ptr<Packet> p, CustomHeader &ch, bool cnp);
     void HandleBccTransient(Ptr<RdmaQueuePair> qp, const BccTag &tag);
     void HandleBccPersistent(Ptr<RdmaQueuePair> qp, uint8_t state, bool cnp);
+    bool BccMlxTimersAllowed(Ptr<RdmaQueuePair> qp) const;
+    void CancelBccPersistentTimers(Ptr<RdmaQueuePair> qp);
+    void EnterBccTransientController(Ptr<RdmaQueuePair> qp);
+    void EnterBccPersistentController(Ptr<RdmaQueuePair> qp);
     void PauseBcc(Ptr<RdmaQueuePair> qp, Time pauseTime);
-    void SetBccInflightBound(Ptr<RdmaQueuePair> qp, DataRate rate);
+    void SetBccInflightBoundFromRate(Ptr<RdmaQueuePair> qp, DataRate rHat);
     DataRate ClampBccRate(Ptr<RdmaQueuePair> qp, double bitRate) const;
     DataRate EstimateBccArrivalRate(Ptr<RdmaQueuePair> qp);
     void SyncBccPersistentController(Ptr<RdmaQueuePair> qp);

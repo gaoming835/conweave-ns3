@@ -3,6 +3,182 @@
 This directory contains the staged reproduction harness for
 `BCC: Re-architecting Congestion Control in DCNs`.
 
+For the implementation roadmap and known protocol gaps, see
+`bcc/long_term_plan.md`.
+
+## Phase 0 BCC guardrail smoke
+
+Phase 0 freezes the current BCC baseline before deeper protocol changes. Run it
+from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+python3 bcc/run_phase0_smoke.py --simul-time 0.01 --netload 20
+```
+
+Equivalent host-side Docker command from this repo root:
+
+```sh
+docker run --rm -v "$(pwd)":/root cw-sim:sigcomm23ae bash -lc "cd /root && ./waf configure --build-profile=optimized && ./waf build && python3 bcc/run_phase0_smoke.py --simul-time 0.01 --netload 20"
+```
+
+The required BCC parameter combination is:
+
+- `--cc bcc`, which writes `CC_MODE 10`.
+- `--enable_bcc 1`, which enables switch-side BCC marking and the
+  `bcc_state` monitor.
+- `--pfc 1 --irn 0`, matching the current lossless RDMA smoke setup.
+- `--lb fecmp`, keeping load balancing simple while testing BCC feedback.
+
+`run_phase0_smoke.py` fails if `config.txt` does not contain `CC_MODE 10` and
+`ENABLE_BCC 1`, or if any required output is missing or empty:
+
+- raw FCT: `<run_id>_out_fct.txt`
+- raw queue: `<run_id>_out_qlen.txt`
+- raw switch rate: `<run_id>_out_rate.txt`
+- raw source rate: `<run_id>_out_source_rate.txt`
+- raw BCC state: `<run_id>_out_bcc_state.txt`
+- raw BCC TCM controller state: `<run_id>_out_bcc_tcm.txt`
+- summary CSVs: `stage1_metrics.csv`, `stage1_queue_timeseries.csv`,
+  `stage1_rate_timeseries.csv`, `stage2_bcc_state_summary.csv`,
+  `rate-vs-time.csv`, and `queue-vs-time.csv`
+
+## Phase 1 priority merge smoke
+
+Phase 1 keeps the highest-priority BCC state seen along a path instead of
+letting a later switch overwrite the existing packet tag. The priority order is
+`TC > PC > NC > TU`.
+
+Run the targeted smoke from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+./waf --run bcc-priority-merge-test
+```
+
+The smoke covers:
+
+- first hop `TC`, later hop `NC` -> final path state `TC`
+- path has `PC` and `TU` -> final path state `PC`
+- path has only `TU` feedback -> final path state `TU`
+- debug telemetry remains attached to the hop that supplied the selected final
+  path state
+
+## Phase 2 switch state-machine smoke
+
+Phase 2 replaces per-packet stateless switch classification with explicit
+per-egress-port BCC state transitions. `BccPortState.state` is treated as the
+previous state and updated by queue length, normalized queue slope, and link
+utilization.
+
+Run the targeted smoke from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+./waf --run bcc-switch-state-machine-test
+```
+
+The transition table is:
+
+```text
+NC -> PC when queue_len > K1
+PC -> NC when queue_len < K1
+PC -> TC when queue_slope > S or queue_len > K2
+TC -> PC when queue_slope < S and queue_len < K2
+NC -> TU when link_utilization < U
+TU -> NC when link_utilization > U
+```
+
+Conflict order is congestion first, then under-utilization. In particular,
+`queue_len > K1` prevents `NC -> TU`, and a `TU` port moves to `PC` or `TC`
+when queue congestion appears before utilization has recovered.
+
+Unit conventions:
+
+- `queue_len`, `K1`, and `K2` are bytes from the egress port queue and ECN
+  thresholds.
+- `queue_slope` is the queue-byte delta divided by bytes the link could
+  transmit during the update interval.
+- `link_utilization` is transmitted bytes divided by bytes the link could
+  transmit during the update interval, clamped to `[0, 1]`.
+
+## Phase 3 header feedback smoke
+
+Phase 3 moves BCC feedback onto simulator headers while keeping `BccTag` as
+debug telemetry and fallback. Data packets encode BCC state in the IPv4 ECN
+bits:
+
+```text
+TC = 00
+NC = 01
+TU = 10
+PC = 11
+```
+
+ACK/NACK packets carry a qbbHeader BCC-valid flag, BCC state, and a 3-bit
+quantized utilization field for TU feedback. The source-side BCC controller
+reads qbbHeader feedback first and falls back to `BccTag` only when the header
+does not contain BCC feedback.
+
+Run the targeted smoke from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+./waf --run bcc-header-feedback-test
+```
+
+The smoke checks ECN state mapping, qbbHeader BCC serialization, 3-bit
+utilization preservation, and ACK serialized-size accounting.
+
+## Phase 4 TCM behavior smoke
+
+Phase 4 tightens the source-side transient controller. `R_hat` is estimated
+from ACKed bytes over the BCC control period. TC feedback computes
+`Tp = I / R_hat - Tb`, extends the source pause only when the new resume time is
+later than the current one, ramps down toward `R_hat`, and sets
+`B = R_hat * Tb`. TU feedback decodes utilization `u`, updates
+`R_hat = R_hat / u`, and updates the same inflight bound.
+
+Run the targeted smoke from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+./waf --run bcc-tcm-helper-test
+```
+
+`RdmaQueuePair::GetWin()` gives `bcc.m_inflightBound` priority over `m_win` and
+variable-window scaling, so the Phase 4 bound directly gates source
+transmission. BCC runs also write `<run_id>_out_bcc_tcm.txt` with per-flow
+`R_hat`, pause time, resume time, inflight bound, inflight bytes, decoded
+utilization, and mode-transition counters.
+
+## Phase 5 PCM handoff smoke
+
+Phase 5 makes the TCM/PCM handoff explicit. BCC keeps a gentle-DCQCN wrapper
+for PCM instead of calling the full DCQCN path directly:
+
+- On PCM -> TCM, BCC cancels the DCQCN/Mellanox alpha, decrease, and rate
+  increase timers and synchronizes `mlx.m_targetRate` to the latest TCM rate.
+- While in TCM, stale DCQCN/Mellanox timer callbacks are suppressed if they fire
+  after cancellation.
+- On TCM -> PCM, BCC hands the final TCM rate to `mlx.m_targetRate`, resets PCM
+  stage bookkeeping, and restarts the wrapper timers.
+- PCM starts with `alpha = min(1, 2 * BCC_MD_FACTOR)` and uses
+  `BCC_MD_FACTOR` for the gentle multiplicative decrease step.
+
+Run the targeted smoke from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+./waf --run bcc-mode-handoff-test
+```
+
 Stage 1 is a DCQCN/ECN baseline on top of the existing RDMA ns-3 simulator.
 It intentionally does not implement BCC yet. The current goal is to keep a
 clean baseline with reproducible topology, workload, CSV metrics, and figures.
@@ -67,13 +243,15 @@ python3 bcc/run_stage2_switch_state.py --simul-time 0.01 --netload 20
 
 This writes `mix/output/<run_id>/<run_id>_out_bcc_state.txt` plus
 `stage2_bcc_state_summary.csv` and `figures/bcc_state_fraction.png`.
-The state approximation is:
+The switch egress state machine uses the same Phase 2 transition table:
 
 ```text
-if queue_len > K2 or queue_slope > S: TC
-else if queue_len > K1: PC
-else if link_utilization < U: TU
-else: NC
+NC -> PC when queue_len > K1
+PC -> NC when queue_len < K1
+PC -> TC when queue_slope > S or queue_len > K2
+TC -> PC when queue_slope < S and queue_len < K2
+NC -> TU when link_utilization < U
+TU -> NC when link_utilization > U
 ```
 
 where `U=0.9`, `S=1.0`, `K1=ECN Kmin`, and `K2=ECN Kmax`.
@@ -165,9 +343,10 @@ python3 bcc/run_stage5_fattree.py --workloads rpc --schemes dcqcn --duration 0.0
   feedback path and bimodal controller are now implemented as a Stage 3
   approximation.
 - Stage 3 uses `PacketTag` echo on ACKs instead of a real P4/header format.
-- Stage 3's TCM uses ACKed bytes over a configurable control period to estimate
-  arrival rate; it does not yet reproduce every timing detail from the paper.
-- Stage 3's PCM is a gentle DCQCN-style controller rather than a line-for-line
+- Phase 4 implements the main TCM equations for `R_hat`, TC pause/ramp-down,
+  TU ramp-up, and inflight-bound updates. It is still a simulator
+  approximation rather than a line-for-line implementation of the BCC prototype.
+- Phase 5 keeps PCM as a gentle DCQCN-style wrapper rather than a line-for-line
   implementation of the BCC prototype.
 - Stage 4 is a minimal qualitative reproduction target. It focuses on the
   Fig.5-style aggregate sender-rate and bottleneck queue behavior, not full

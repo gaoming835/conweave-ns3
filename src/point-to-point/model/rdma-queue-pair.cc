@@ -69,13 +69,18 @@ RdmaQueuePair::RdmaQueuePair(uint16_t pg, Ipv4Address _sip, Ipv4Address _dip, ui
     dctcp.m_batchSizeOfAlpha = 0;
 
     bcc.m_enabled = false;
-    bcc.m_mode = 1;
+    bcc.m_mode = BCC_PCM;
     bcc.m_lastState = 0;
     bcc.m_inflightBound = 0;
     bcc.m_resumeTime = 0;
     bcc.m_lastControlTime = 0;
     bcc.m_ackedBytes = 0;
     bcc.m_lastAckedBytes = 0;
+    bcc.m_lastPauseTime = 0;
+    bcc.m_lastControlInflight = 0;
+    bcc.m_modeTransitions = 0;
+    bcc.m_lastModeTransitionTime = 0;
+    bcc.m_lastUtilization = 1.0;
     bcc.m_arrivalRate = DataRate(0);
 
     irn.m_enabled = false;

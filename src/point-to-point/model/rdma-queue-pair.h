@@ -115,12 +115,12 @@ class RdmaQueuePair : public Object {
         uint32_t m_batchSizeOfAlpha;
     } dctcp;
 
-    struct {
-        enum Mode : uint8_t {
-            TCM = 0,
-            PCM = 1,
-        };
+    enum BccMode : uint8_t {
+        BCC_TCM = 0,
+        BCC_PCM = 1,
+    };
 
+    struct {
         bool m_enabled;
         uint8_t m_mode;
         uint8_t m_lastState;
@@ -129,6 +129,11 @@ class RdmaQueuePair : public Object {
         uint64_t m_lastControlTime;
         uint64_t m_ackedBytes;
         uint64_t m_lastAckedBytes;
+        uint64_t m_lastPauseTime;
+        uint64_t m_lastControlInflight;
+        uint64_t m_modeTransitions;
+        uint64_t m_lastModeTransitionTime;
+        double m_lastUtilization;
         DataRate m_arrivalRate;
     } bcc;
 

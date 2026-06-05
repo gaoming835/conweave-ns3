@@ -73,6 +73,72 @@ double BccTag::GetLinkUtilization(void) const { return m_linkUtilization; }
 void BccTag::SetTimestampNs(uint64_t timestampNs) { m_timestampNs = timestampNs; }
 uint64_t BccTag::GetTimestampNs(void) const { return m_timestampNs; }
 
+uint8_t BccTag::GetStatePriority(uint8_t state) {
+    switch (state) {
+        case TC:
+            return 3;
+        case PC:
+            return 2;
+        case NC:
+            return 1;
+        case TU:
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+bool BccTag::ShouldReplacePathState(uint8_t localState, uint8_t existingPathState) {
+    return GetStatePriority(localState) > GetStatePriority(existingPathState);
+}
+
+uint8_t BccTag::StateToEcnBits(uint8_t state) {
+    switch (state) {
+        case TC:
+            return 0x00;
+        case NC:
+            return 0x01;
+        case TU:
+            return 0x02;
+        case PC:
+            return 0x03;
+        default:
+            return 0x01;
+    }
+}
+
+uint8_t BccTag::EcnBitsToState(uint8_t ecnBits) {
+    switch (ecnBits & 0x03) {
+        case 0x00:
+            return TC;
+        case 0x01:
+            return NC;
+        case 0x02:
+            return TU;
+        case 0x03:
+            return PC;
+        default:
+            return NC;
+    }
+}
+
+uint8_t BccTag::QuantizeUtilization(double utilization) {
+    if (utilization < 0.0) {
+        utilization = 0.0;
+    }
+    if (utilization > 1.0) {
+        utilization = 1.0;
+    }
+    return (uint8_t)(utilization * 7.0 + 0.5);
+}
+
+double BccTag::DequantizeUtilization(uint8_t quantized) {
+    if (quantized > 7) {
+        quantized = 7;
+    }
+    return (double)quantized / 7.0;
+}
+
 const char *BccTag::StateToString(uint8_t state) {
     switch (state) {
         case NC:

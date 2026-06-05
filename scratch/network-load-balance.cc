@@ -54,7 +54,7 @@ using namespace std;
 NS_LOG_COMPONENT_DEFINE("GENERIC_SIMULATION");
 
 /*------Load balancing parameters-----*/
-// mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave
+// mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave, 10: Template
 uint32_t lb_mode = 0;
 
 // Conga params (based on paper recommendation)
@@ -78,7 +78,7 @@ bool conweave_pathAwareRerouting = true;
 
 /*------------------------ simulation variables -----------------------------*/
 uint64_t one_hop_delay = 1000;  // nanoseconds
-uint32_t cc_mode = 1;           // mode for congestion control, 1: DCQCN
+uint32_t cc_mode = 1;           // mode for congestion control, 1: DCQCN, 10: Template
 bool enable_qcn = true, enable_pfc = true, use_dynamic_pfc_threshold = true;
 uint32_t packet_payload_size = 1000, l2_chunk_size = 0, l2_ack_interval = 0;
 double pause_time = 5;  // PFC pause, microseconds
@@ -101,6 +101,7 @@ FILE *qlen_output = NULL;
 FILE *rate_output = NULL;
 FILE *source_rate_output = NULL;
 FILE *bcc_state_output = NULL;
+FILE *bcc_tcm_output = NULL;
 FILE *est_error_output = NULL;
 FILE *voq_output = NULL;
 FILE *voq_detail_output = NULL;
@@ -116,6 +117,7 @@ std::string qlen_mon_file = "qlen.txt";
 std::string rate_mon_file = "rate.txt";
 std::string source_rate_mon_file = "source_rate.txt";
 std::string bcc_state_mon_file = "bcc_state.txt";
+std::string bcc_tcm_mon_file = "bcc_tcm.txt";
 std::string voq_mon_file = "voq.txt";
 std::string voq_mon_detail_file = "voq_detail.txt";
 std::string uplink_mon_file = "uplink.txt";
@@ -406,6 +408,46 @@ void source_rate_monitoring(FILE *fout) {
 
     if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
         Simulator::Schedule(NanoSeconds(switch_mon_interval), &source_rate_monitoring, fout);
+    }
+}
+
+/**
+ * @brief Source-side BCC transient controller monitor.
+ * Output:
+ * time_ns,node_id,flow_id,state,mode,current_rate_bps,r_hat_bps,pause_ns,resume_ns,inflight_bound,
+ * inflight_bytes,last_acked_bytes,last_control_inflight,utilization,mode_transitions,
+ * last_mode_transition_ns.
+ */
+void bcc_tcm_monitoring(FILE *fout) {
+    if (!enable_bcc) {
+        return;
+    }
+
+    uint64_t now = Simulator::Now().GetNanoSeconds();
+    for (uint32_t i = 0; i < Settings::node_num; i++) {
+        if (n.Get(i)->GetNodeType() != 0) {
+            continue;
+        }
+        Ptr<RdmaDriver> rdmaDriver = n.Get(i)->GetObject<RdmaDriver>();
+        Ptr<RdmaHw> rdmaHw = rdmaDriver->m_rdma;
+        for (auto qpEntry : rdmaHw->m_qpMap) {
+            Ptr<RdmaQueuePair> qp = qpEntry.second;
+            if (!qp->bcc.m_enabled || qp->IsFinishedConst()) {
+                continue;
+            }
+            fprintf(fout, "%lu,%u,%d,%s,%u,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%.6f,%lu,%lu\n", now, i,
+                    qp->m_flow_id, SwitchNode::BccStateToString(qp->bcc.m_lastState),
+                    qp->bcc.m_mode, qp->m_rate.GetBitRate(), qp->bcc.m_arrivalRate.GetBitRate(),
+                    qp->bcc.m_lastPauseTime, qp->bcc.m_resumeTime, qp->bcc.m_inflightBound,
+                    qp->GetOnTheFly(), qp->bcc.m_lastAckedBytes, qp->bcc.m_lastControlInflight,
+                    qp->bcc.m_lastUtilization, qp->bcc.m_modeTransitions,
+                    qp->bcc.m_lastModeTransitionTime);
+        }
+    }
+    fflush(fout);
+
+    if (Simulator::Now() < Seconds(flowgen_stop_time + 0.05)) {
+        Simulator::Schedule(NanoSeconds(switch_mon_interval), &bcc_tcm_monitoring, fout);
     }
 }
 
@@ -1174,6 +1216,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("BCC_STATE_MON_FILE") == 0) {
                 conf >> bcc_state_mon_file;
                 std::cerr << "BCC_STATE_MON_FILE\t\t\t\t" << bcc_state_mon_file << '\n';
+            } else if (key.compare("BCC_TCM_MON_FILE") == 0) {
+                conf >> bcc_tcm_mon_file;
+                std::cerr << "BCC_TCM_MON_FILE\t\t\t\t" << bcc_tcm_mon_file << '\n';
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';
@@ -1915,6 +1960,7 @@ int main(int argc, char *argv[]) {
     source_rate_output = fopen(source_rate_mon_file.c_str(), "w");
     if (enable_bcc) {
         bcc_state_output = fopen(bcc_state_mon_file.c_str(), "w");
+        bcc_tcm_output = fopen(bcc_tcm_mon_file.c_str(), "w");
     }
     uplink_output = fopen(uplink_mon_file.c_str(), "w");  // common
     conn_output = fopen(conn_mon_file.c_str(), "w");      // common
@@ -1951,6 +1997,7 @@ int main(int argc, char *argv[]) {
     Simulator::Schedule(Seconds(flowgen_start_time), &source_rate_monitoring, source_rate_output);
     if (enable_bcc) {
         Simulator::Schedule(Seconds(flowgen_start_time), &bcc_state_monitoring, bcc_state_output);
+        Simulator::Schedule(Seconds(flowgen_start_time), &bcc_tcm_monitoring, bcc_tcm_output);
     }
 
     //
