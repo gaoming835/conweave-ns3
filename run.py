@@ -4,7 +4,6 @@ import subprocess
 import os
 import time
 from xmlrpc.client import boolean
-import numpy as np
 import copy
 import shutil
 import random
@@ -15,7 +14,7 @@ import argparse
 from datetime import date
 
 # randomID
-random.seed(datetime.now())
+random.seed(datetime.now().isoformat())
 MAX_RAND_RANGE = 1000000000
 
 # config template
@@ -85,6 +84,7 @@ SAMPLE_FEEDBACK 0
 
 ENABLE_QCN 1
 ENABLE_BCC {enable_bcc}
+ACK_HIGH_PRIO {ack_high_prio}
 BCC_U {bcc_u}
 BCC_S {bcc_s}
 BCC_CONTROL_PERIOD {bcc_control_period}
@@ -165,6 +165,18 @@ def build_pmax_map(rates, value):
     return " ".join(fields)
 
 
+def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
+    if enable_bcc and cc_mode != 10:
+        raise Exception(
+            "CONFIG ERROR : ENABLE_BCC=1 requires CC_MODE=10 (--cc bcc).")
+    if cc_mode == 10 and not enable_bcc:
+        raise Exception(
+            "CONFIG ERROR : CC_MODE=10 requires ENABLE_BCC=1 for switch-side BCC marking.")
+    if enable_bcc and not ack_high_prio:
+        raise Exception(
+            "CONFIG ERROR : BCC feedback is carried by ACKs, so ACK_HIGH_PRIO must be 1.")
+
+
 def main():
     # make directory if not exists
     isExist = os.path.exists(os.getcwd() + "/mix/output/")
@@ -211,6 +223,8 @@ def main():
                         type=float, default=4, help="DCQCN rate decrease interval Td in us (default preserves existing config: 4)")
     parser.add_argument('--enable_bcc', dest='enable_bcc', action='store',
                         type=int, default=0, help="enable BCC switch-side packet tagging (default: 0)")
+    parser.add_argument('--ack_high_prio', dest='ack_high_prio', action='store',
+                        type=int, default=1, help="set high priority for ACK/NACK packets (default: 1)")
     parser.add_argument('--bcc_u', dest='bcc_u', action='store',
                         type=float, default=0.9, help="BCC TU utilization threshold (default: 0.9)")
     parser.add_argument('--bcc_s', dest='bcc_s', action='store',
@@ -221,6 +235,8 @@ def main():
                         type=float, default=0.1, help="BCC PCM gentle multiplicative decrease factor (default: 0.1)")
     parser.add_argument('--skip_fct_analysis', dest='skip_fct_analysis', action='store',
                         type=int, default=0, help="skip fctAnalysis.py after simulation (default: 0)")
+    parser.add_argument('--validate_only', dest='validate_only', action='store',
+                        type=int, default=0, help="validate config combinations and exit before creating a run (default: 0)")
 
     # #### CONWEAVE PARAMETERS ####
     # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
@@ -249,7 +265,20 @@ def main():
     lb_mode = lb_modes[args.lb]
     enabled_pfc = int(args.pfc)
     enabled_irn = int(args.irn)
-    enable_bcc = 1 if cc_mode == 10 else args.enable_bcc
+    enable_bcc = int(args.enable_bcc)
+    if cc_mode == 10 and enable_bcc == 0:
+        print("CONFIG WARNING : --cc bcc requires switch-side BCC marking; auto-setting ENABLE_BCC=1.",
+              file=sys.stderr)
+        enable_bcc = 1
+    ack_high_prio = int(args.ack_high_prio)
+    try:
+        validate_bcc_config(cc_mode, enable_bcc, ack_high_prio)
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    if args.validate_only:
+        print("config_validation=pass")
+        return
     bw = int(args.bw)
     buffer = args.buffer
     topo = args.topo
@@ -454,6 +483,7 @@ def main():
                                         alpha_resume_interval=args.dcqcn_ti_us,
                                         rate_decrease_interval=args.dcqcn_td_us,
                                         enable_bcc=enable_bcc,
+                                        ack_high_prio=ack_high_prio,
                                         bcc_u=args.bcc_u,
                                         bcc_s=args.bcc_s,
                                         bcc_control_period=args.bcc_control_period_us,

@@ -179,6 +179,57 @@ Run the targeted smoke from inside the README Docker container:
 ./waf --run bcc-mode-handoff-test
 ```
 
+## Phase 6 configuration and scenario ergonomics
+
+Phase 6 makes BCC harder to misconfigure and easier to inspect:
+
+- `run.py` validates the BCC parameter bundle before creating a run directory.
+- `ACK_HIGH_PRIO` is explicit in generated configs and remains enabled for BCC.
+- The simulator also rejects invalid hand-written configs where BCC feedback
+  would be enabled without `CC_MODE 10`, or where ACK high priority is disabled.
+- `bcc/export_bcc_tcm.py` writes named source-controller CSVs with
+  `final_path_state`, `source_mode_name`, pause timing, `R_hat`, inflight bound,
+  and TU utilization.
+
+Config-only validation can be run without launching ns-3:
+
+```sh
+python3 run.py --cc bcc --validate_only 1
+python3 run.py --cc dcqcn --enable_bcc 1 --validate_only 1  # expected to fail
+```
+
+Named Phase-6 scenarios:
+
+```text
+bcc_smoke         compact mixed background plus incast guardrail
+bcc_tc_incast     synchronized incast bursts intended to expose TC behavior
+bcc_tu_departure  several short flows depart while one flow remains
+bcc_pc_longflows  steady long-flow coexistence for PCM/PC inspection
+```
+
+Run one scenario from inside the README Docker container:
+
+```sh
+./waf configure --build-profile=optimized
+./waf build
+python3 bcc/run_phase6_scenario.py --scenario bcc_smoke --simul-time 0.01
+```
+
+Equivalent host-side Docker command:
+
+```sh
+docker run --rm -v "$(pwd)":/root cw-sim:sigcomm23ae bash -lc "cd /root && ./waf configure --build-profile=optimized && ./waf build && python3 bcc/run_phase6_scenario.py --scenario bcc_smoke --simul-time 0.01"
+```
+
+Each scenario writes raw simulator logs plus:
+
+- `stage1_metrics.csv`
+- `stage2_bcc_state_summary.csv`
+- `rate-vs-time.csv`
+- `queue-vs-time.csv`
+- `bcc_tcm_timeseries.csv`
+- `bcc_tcm_summary.csv`
+
 Stage 1 is a DCQCN/ECN baseline on top of the existing RDMA ns-3 simulator.
 It intentionally does not implement BCC yet. The current goal is to keep a
 clean baseline with reproducible topology, workload, CSV metrics, and figures.

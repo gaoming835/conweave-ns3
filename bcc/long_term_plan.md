@@ -16,6 +16,11 @@ The repository already has:
 - ACK echo of `BccTag` from receiver to sender.
 - Source-side `cc_mode == 10` handling for TC/TU transient control and PC/NC
   persistent control.
+- Phase-6 config validation for BCC mode/marking/ACK-priority combinations.
+- Named Phase-6 scenario runner for smoke, TC incast, TU departure, and PC
+  long-flow inspection.
+- Source-controller CSV export with final path state, source mode, pause timing,
+  `R_hat`, inflight bound, and TU utilization.
 - Staged experiment scripts under `bcc/`.
 
 Known gaps:
@@ -30,8 +35,8 @@ Known gaps:
   DCQCN controller with all transition details.
 - `CustomHeader::GetAckSerializedSize()` does not include all ACK fields that
   are serialized.
-- `ENABLE_BCC`, `CC_MODE=10`, and ACK high-priority settings can be combined in
-  invalid or misleading ways.
+- Named Phase-6 scenarios are compact debugging harnesses, not a full validation
+  matrix or paper-level reproduction.
 
 ## Goal
 
@@ -200,8 +205,12 @@ Tasks:
 Acceptance:
 
 - Invalid BCC parameter combinations fail early or print a clear warning.
-- Each named BCC scenario can be run with one Docker command.
+  Implemented in `run.py` and mirrored in `scratch/network-load-balance.cc`.
+- Each named BCC scenario can be run with one Docker command. Implemented by
+  `bcc/run_phase6_scenario.py`.
 - Logs are sufficient to explain state transitions and source-rate changes.
+  Raw `bcc_tcm` output is exported by `bcc/export_bcc_tcm.py` into named CSV
+  fields.
 
 ## Phase 7: validation matrix
 

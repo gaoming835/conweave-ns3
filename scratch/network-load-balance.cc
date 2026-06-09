@@ -143,6 +143,7 @@ double u_target = 0.95;
 uint32_t int_multi = 1;
 bool rate_bound = true;
 bool enable_bcc = false;
+uint32_t ack_high_prio = 1;
 double bcc_u = 0.9;
 double bcc_s = 1.0;
 double bcc_control_period = 55.0;
@@ -414,7 +415,7 @@ void source_rate_monitoring(FILE *fout) {
 /**
  * @brief Source-side BCC transient controller monitor.
  * Output:
- * time_ns,node_id,flow_id,state,mode,current_rate_bps,r_hat_bps,pause_ns,resume_ns,inflight_bound,
+ * time_ns,node_id,flow_id,final_path_state,source_mode,current_rate_bps,r_hat_bps,pause_ns,resume_ns,inflight_bound,
  * inflight_bytes,last_acked_bytes,last_control_inflight,utilization,mode_transitions,
  * last_mode_transition_ns.
  */
@@ -1252,6 +1253,9 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 enable_bcc = v;
                 std::cerr << "ENABLE_BCC\t\t" << enable_bcc << "\n";
+            } else if (key.compare("ACK_HIGH_PRIO") == 0) {
+                conf >> ack_high_prio;
+                std::cerr << "ACK_HIGH_PRIO\t\t" << ack_high_prio << "\n";
             } else if (key.compare("BCC_U") == 0) {
                 conf >> bcc_u;
                 std::cerr << "BCC_U\t\t\t" << bcc_u << "\n";
@@ -1293,6 +1297,19 @@ int main(int argc, char *argv[]) {
 
     /******************* READING CONFIG FILE IS DONE ***********************/
 
+    if (enable_bcc && cc_mode != 10) {
+        std::cerr << "CONFIG ERROR : ENABLE_BCC=1 requires CC_MODE=10.\n";
+        exit(1);
+    }
+    if (cc_mode == 10 && !enable_bcc) {
+        std::cerr << "CONFIG ERROR : CC_MODE=10 requires ENABLE_BCC=1 for switch-side BCC marking.\n";
+        exit(1);
+    }
+    if (enable_bcc && ack_high_prio == 0) {
+        std::cerr << "CONFIG ERROR : BCC feedback uses ACKs, so ACK_HIGH_PRIO must be 1.\n";
+        exit(1);
+    }
+
     /**
      * Activate ns3 logging
      */
@@ -1314,9 +1331,10 @@ int main(int argc, char *argv[]) {
     Config::SetDefault("ns3::QbbNetDevice::DynamicThreshold", BooleanValue(dynamicth));
     Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(enable_pfc));
 
-    if (cc_mode != 1 && lb_mode == 9) {
-        std::cout << "Currently, ConWeave supports only DCQCN congestion control for RDMA. \nIf "
-                     "you want to extend, the reordering delay at DstTor must be considered."
+    if (cc_mode != 1 && !(cc_mode == 10 && enable_bcc) && lb_mode == 9) {
+        std::cout << "Currently, ConWeave supports only DCQCN congestion control for RDMA, plus "
+                     "the BCC mode built on the DCQCN PCM path. \nIf you want to extend other "
+                     "CCs, the reordering delay at DstTor must be considered."
                   << std::endl;
         exit(1);
     }
@@ -1648,7 +1666,7 @@ int main(int argc, char *argv[]) {
         if (n.Get(i)->GetNodeType() == 1) {  // switch
             Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(n.Get(i));
             sw->SetAttribute("CcMode", UintegerValue(cc_mode));
-            sw->SetAttribute("AckHighPrio", UintegerValue(1));
+            sw->SetAttribute("AckHighPrio", UintegerValue(ack_high_prio));
         }
     }
 
