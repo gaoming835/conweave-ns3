@@ -53,6 +53,7 @@ stats_file="${run_dir}/${run_id}_out_dcp_stats.txt"
 grep -q '^ENABLE_DCP 1$' "${run_dir}/config.txt"
 grep -q '^TRANSPORT_MODE dcp$' "${run_dir}/config.txt"
 grep -q '^DCP_STATS_FILE ' "${run_dir}/config.txt"
+grep -q '^DCP_HO_SIZE 0$' "${run_dir}/config.txt"
 test -f "${stats_file}"
 
 expected_fields=(
@@ -73,6 +74,10 @@ expected_fields=(
   dcp_completed_messages
   dcp_ho_dropped
   dcp_data_dropped
+  dcp_non_dropped
+  dcp_ack_dropped
+  dcp_ho_bytes
+  dcp_data_bytes_trimmed
   control_queue_len
   data_queue_len
 )
@@ -88,6 +93,10 @@ grep -q '^dcp_ho_rx_at_receiver,0$' "${stats_file}"
 grep -q '^dcp_ho_rx_at_sender,0$' "${stats_file}"
 grep -q '^dcp_ho_dropped,0$' "${stats_file}"
 grep -q '^dcp_data_dropped,0$' "${stats_file}"
+grep -q '^dcp_non_dropped,0$' "${stats_file}"
+grep -q '^dcp_ack_dropped,0$' "${stats_file}"
+grep -q '^dcp_ho_bytes,0$' "${stats_file}"
+grep -q '^dcp_data_bytes_trimmed,0$' "${stats_file}"
 
 echo "dcp_config_smoke=pass"
 echo "run_id=${run_id}"

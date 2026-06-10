@@ -39,7 +39,7 @@ flow_file_in_repo="${flow_file#${REPO_ROOT}/}"
 find mix/output -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort > "${before}"
 
 docker run --rm -v "${REPO_ROOT}:/root" "${IMAGE}" bash -lc \
-  "cd /root && ./waf configure --build-profile=optimized >/tmp/dcp_waf_configure.log 2>&1 && ./waf >/tmp/dcp_waf_build.log 2>&1 && python3 ./run.py --transport dcp --cc dcqcn --lb fecmp --pfc 1 --irn 0 --simul_time 0.01 --netload 10 --topo bcc_stage4_single_switch_5_25G_OS1 --bw 25 --flow_file ${flow_file_in_repo} --dcp_trim_threshold 1000 --skip_fct_analysis 1"
+  "cd /root && ./waf configure --build-profile=optimized >/tmp/dcp_waf_configure.log 2>&1 && ./waf >/tmp/dcp_waf_build.log 2>&1 && ./waf --run dcp-trim-semantics-test && python3 ./run.py --transport dcp --cc dcqcn --lb fecmp --pfc 1 --irn 0 --simul_time 0.01 --netload 10 --topo bcc_stage4_single_switch_5_25G_OS1 --bw 25 --flow_file ${flow_file_in_repo} --dcp_trim_threshold 1000 --skip_fct_analysis 1"
 
 find mix/output -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort > "${after}"
 run_id="$(comm -13 "${before}" "${after}" | tail -n 1)"
@@ -56,6 +56,7 @@ stats_file="${run_dir}/${run_id}_out_dcp_stats.txt"
 grep -q '^ENABLE_DCP 1$' "${run_dir}/config.txt"
 grep -q '^TRANSPORT_MODE dcp$' "${run_dir}/config.txt"
 grep -q '^DCP_TRIM_THRESHOLD 1000$' "${run_dir}/config.txt"
+grep -q '^DCP_HO_SIZE 0$' "${run_dir}/config.txt"
 test -f "${stats_file}"
 
 get_stat() {
@@ -65,8 +66,14 @@ get_stat() {
 dcp_trim_events="$(get_stat dcp_trim_events)"
 dcp_ho_generated="$(get_stat dcp_ho_generated)"
 dcp_ho_dropped="$(get_stat dcp_ho_dropped)"
+dcp_ho_bytes="$(get_stat dcp_ho_bytes)"
+dcp_data_bytes_trimmed="$(get_stat dcp_data_bytes_trimmed)"
+dcp_non_dropped="$(get_stat dcp_non_dropped)"
+dcp_ack_dropped="$(get_stat dcp_ack_dropped)"
 
-if [[ -z "${dcp_trim_events}" || -z "${dcp_ho_generated}" || -z "${dcp_ho_dropped}" ]]; then
+if [[ -z "${dcp_trim_events}" || -z "${dcp_ho_generated}" || -z "${dcp_ho_dropped}" ||
+      -z "${dcp_ho_bytes}" || -z "${dcp_data_bytes_trimmed}" ||
+      -z "${dcp_non_dropped}" || -z "${dcp_ack_dropped}" ]]; then
   echo "missing DCP trim counters in ${stats_file}" >&2
   exit 1
 fi
@@ -82,6 +89,14 @@ if (( dcp_ho_dropped > 1 )); then
   echo "expected dcp_ho_dropped == 0 or close to 0, got ${dcp_ho_dropped}" >&2
   exit 1
 fi
+if (( dcp_ho_bytes <= 0 )); then
+  echo "expected dcp_ho_bytes > 0, got ${dcp_ho_bytes}" >&2
+  exit 1
+fi
+if (( dcp_data_bytes_trimmed <= 0 )); then
+  echo "expected dcp_data_bytes_trimmed > 0, got ${dcp_data_bytes_trimmed}" >&2
+  exit 1
+fi
 
 echo "dcp_trim_smoke=pass"
 echo "run_id=${run_id}"
@@ -89,3 +104,7 @@ echo "stats_file=${stats_file}"
 echo "dcp_trim_events=${dcp_trim_events}"
 echo "dcp_ho_generated=${dcp_ho_generated}"
 echo "dcp_ho_dropped=${dcp_ho_dropped}"
+echo "dcp_ho_bytes=${dcp_ho_bytes}"
+echo "dcp_data_bytes_trimmed=${dcp_data_bytes_trimmed}"
+echo "dcp_non_dropped=${dcp_non_dropped}"
+echo "dcp_ack_dropped=${dcp_ack_dropped}"

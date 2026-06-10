@@ -177,7 +177,7 @@ def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
             "CONFIG ERROR : BCC feedback is carried by ACKs, so ACK_HIGH_PRIO must be 1.")
 
 
-def build_dcp_config_block(enable_dcp, config_id, trim_threshold, retrans_per_round,
+def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retrans_per_round,
                            enable_timeout_retx):
     if not enable_dcp:
         return ""
@@ -186,9 +186,11 @@ def build_dcp_config_block(enable_dcp, config_id, trim_threshold, retrans_per_ro
         "TRANSPORT_MODE dcp\n"
         "DCP_STATS_FILE mix/output/{id}/{id}_out_dcp_stats.txt\n"
         "DCP_TRIM_THRESHOLD {trim_threshold}\n"
+        "DCP_HO_SIZE {ho_size}\n"
         "DCP_RETRANS_PER_ROUND {retrans_per_round}\n"
         "DCP_ENABLE_TIMEOUT_RETX {enable_timeout_retx}\n"
     ).format(id=config_id, trim_threshold=trim_threshold,
+             ho_size=ho_size,
              retrans_per_round=retrans_per_round,
              enable_timeout_retx=enable_timeout_retx)
 
@@ -244,6 +246,9 @@ def main():
     parser.add_argument('--dcp_trim_threshold', dest='dcp_trim_threshold', action='store',
                         type=int, default=0xffffffff,
                         help="DCP egress data queue trim threshold in bytes (default: disabled)")
+    parser.add_argument('--dcp_ho_size', dest='dcp_ho_size', action='store',
+                        type=int, default=0,
+                        help="DCP header-only packet size in bytes; 0 uses the current parsed header size (default: 0)")
     parser.add_argument('--dcp_retrans_per_round', dest='dcp_retrans_per_round', action='store',
                         type=int, default=1,
                         help="DCP precise retransmissions dequeued per scheduling round (default: 1)")
@@ -522,6 +527,7 @@ def main():
                                         enable_bcc=enable_bcc,
                                         dcp_config_block=build_dcp_config_block(
                                             enable_dcp, config_ID, args.dcp_trim_threshold,
+                                            args.dcp_ho_size,
                                             args.dcp_retrans_per_round,
                                             args.dcp_enable_timeout_retx),
                                         ack_high_prio=ack_high_prio,

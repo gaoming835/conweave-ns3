@@ -655,6 +655,10 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_completed_messages,%lu\n", Settings::dcp_completed_messages);
     fprintf(fout, "dcp_ho_dropped,%lu\n", Settings::dcp_ho_dropped);
     fprintf(fout, "dcp_data_dropped,%lu\n", Settings::dcp_data_dropped);
+    fprintf(fout, "dcp_non_dropped,%lu\n", Settings::dcp_non_dropped);
+    fprintf(fout, "dcp_ack_dropped,%lu\n", Settings::dcp_ack_dropped);
+    fprintf(fout, "dcp_ho_bytes,%lu\n", Settings::dcp_ho_bytes);
+    fprintf(fout, "dcp_data_bytes_trimmed,%lu\n", Settings::dcp_data_bytes_trimmed);
     fprintf(fout, "control_queue_len,%lu\n", Settings::control_queue_len);
     fprintf(fout, "data_queue_len,%lu\n", Settings::data_queue_len);
     fclose(fout);
@@ -1256,6 +1260,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("DCP_TRIM_THRESHOLD") == 0) {
                 conf >> Settings::dcp_trim_threshold;
                 std::cerr << "DCP_TRIM_THRESHOLD\t\t" << Settings::dcp_trim_threshold << "\n";
+            } else if (key.compare("DCP_HO_SIZE") == 0) {
+                conf >> Settings::dcp_ho_size;
+                std::cerr << "DCP_HO_SIZE\t\t\t\t" << Settings::dcp_ho_size << "\n";
             } else if (key.compare("DCP_RETRANS_PER_ROUND") == 0) {
                 conf >> Settings::dcp_retrans_per_round;
                 if (Settings::dcp_retrans_per_round == 0) {

@@ -77,3 +77,41 @@ Accepted result:
 - The unit test verifies ECN bits survive DCP type writes.
 - The existing packet-type, trim, and HO-return smoke paths still pass after switching
   runtime packet classification to prefer IP ToS/DSCP.
+
+## Phase 2: Complete Packet Trimming Semantics
+
+Date: 2026-06-10
+
+Implemented behavior:
+
+- Switch-side DCP admission is centralized in `SwitchNode::EvaluateDcpAdmission(...)`.
+- DCP HO packets are forced to the control queue.
+- DCP DATA packets enter the data queue below `DCP_TRIM_THRESHOLD` and are trimmed to
+  HO packets above the threshold.
+- DCP ACK packets are dropped when the corresponding data PG queue is above the trim
+  threshold, while preserving the existing ACK high-priority behavior below the threshold.
+- non-DCP packets using data queues are dropped above the trim threshold.
+- `DCP_HO_SIZE` is configurable; the default `0` keeps the current parsed NS-3
+  header-only size.
+- New stats are exported in the DCP stats CSV:
+  `dcp_non_dropped`, `dcp_ack_dropped`, `dcp_ho_bytes`, and
+  `dcp_data_bytes_trimmed`.
+
+Validation:
+
+| Script | Status | Run ID | Key stats |
+| --- | --- | --- | --- |
+| `./waf --run dcp-trim-semantics-test` | pass | N/A, unit smoke | `dcp_trim_semantics_unit=pass` |
+| `scripts/run_dcp_trim_smoke.sh` | pass | `13968323` | `dcp_trim_events=29880587`, `dcp_ho_generated=29880587`, `dcp_ho_dropped=0`, `dcp_ho_bytes=1434268176`, `dcp_data_bytes_trimmed=29880587000`, `dcp_non_dropped=0`, `dcp_ack_dropped=0` |
+| `scripts/run_dcp_config_smoke.sh` | pass | `442555251` | final script checks `DCP_HO_SIZE 0` and all Phase 2 stats fields |
+| `scripts/run_dcp_packet_type_smoke.sh` | pass | `599768941` | `dcp_packet_type_unit=pass`, `dcp_data_packets=5`, `dcp_ho_packets=0` |
+| `scripts/run_dcp_ho_return_smoke.sh` | pass | `890850655` | `dcp_ho_rx_at_receiver=29880584`, `dcp_ho_returned=29880584`, `dcp_ho_rx_at_sender=29880578` |
+
+Accepted result:
+
+- Packet trimming semantics now cover DCP DATA trim, DCP HO control admission, DCP
+  ACK threshold drop, and non-DCP data threshold drop.
+- The new counters are present in config smoke and nonzero for HO byte/trimmed-byte
+  accounting in trim smoke.
+- The trim smoke remains a wiring validation scenario; the large HO counter values are
+  expected for this short congested topology and are not a paper-scale performance claim.

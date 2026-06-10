@@ -45,9 +45,14 @@ uint64_t Settings::dcp_ooo_packets = 0;
 uint64_t Settings::dcp_completed_messages = 0;
 uint64_t Settings::dcp_ho_dropped = 0;
 uint64_t Settings::dcp_data_dropped = 0;
+uint64_t Settings::dcp_non_dropped = 0;
+uint64_t Settings::dcp_ack_dropped = 0;
+uint64_t Settings::dcp_ho_bytes = 0;
+uint64_t Settings::dcp_data_bytes_trimmed = 0;
 uint64_t Settings::control_queue_len = 0;
 uint64_t Settings::data_queue_len = 0;
 uint32_t Settings::dcp_trim_threshold = 0xffffffff;
+uint32_t Settings::dcp_ho_size = 0;
 uint32_t Settings::dcp_retrans_per_round = 1;
 bool Settings::dcp_enable_timeout_retx = false;
 

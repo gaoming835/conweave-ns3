@@ -279,27 +279,47 @@ void SwitchNode::SendToDevContinue(Ptr<Packet> p, CustomHeader &ch) {
     return;  // Drop otherwise
 }
 
-bool SwitchNode::IsDcpDataPacket(Ptr<Packet> p, const CustomHeader &ch, DcpTag *tag) const {
+uint8_t SwitchNode::ClassifyDcpPacket(Ptr<Packet> p, const CustomHeader &ch, DcpTag *tag) const {
     if (!Settings::enable_dcp) {
-        return false;
+        return DcpTag::DCP_NON;
     }
     DcpTag dcpTag;
     bool hasTag = p->PeekPacketTag(dcpTag);
     uint8_t ipType = DcpTag::GetDcpTypeFromTos(ch.m_tos);
-    bool isData = ipType == DcpTag::DCP_DATA ||
-                  (ipType == DcpTag::DCP_NON && hasTag &&
-                   dcpTag.GetPacketType() == DcpTag::DCP_DATA);
-    if (!isData || !hasTag) {
-        return false;
+    uint8_t dcpType = ipType;
+    if (dcpType == DcpTag::DCP_NON && hasTag) {
+        dcpType = dcpTag.GetPacketType();
     }
-    if (tag != NULL) {
+    if (dcpType == DcpTag::DCP_DATA && !hasTag && ch.l3Prot == 0x11) {
+        dcpTag.SetPacketType(DcpTag::DCP_DATA);
+        dcpTag.SetOriginalData(-1, ch.udp.seq, Ipv4Address(ch.sip), Ipv4Address(ch.dip),
+                              ch.udp.sport, ch.udp.dport, ch.udp.pg);
+        hasTag = true;
+    }
+    if (tag != NULL && hasTag) {
         *tag = dcpTag;
     }
-    return true;
+    return dcpType;
+}
+
+uint32_t SwitchNode::GetDcpDataQueueIndex(const CustomHeader &ch, uint32_t qIndex) const {
+    if (qIndex != 0) {
+        return qIndex;
+    }
+    if (ch.l3Prot == 0x11) {
+        return ch.udp.pg;
+    }
+    if (ch.l3Prot == 0xFC || ch.l3Prot == 0xFD) {
+        return ch.ack.pg;
+    }
+    return qIndex;
 }
 
 Ptr<Packet> SwitchNode::CreateDcpHoPacket(Ptr<Packet> p, const DcpTag &dataTag) const {
-    uint32_t headerSize = std::min(p->GetSize(), CustomHeader::GetStaticWholeHeaderSize());
+    uint32_t minHeaderSize = CustomHeader::GetStaticWholeHeaderSize();
+    uint32_t configuredSize = Settings::dcp_ho_size == 0 ? minHeaderSize : Settings::dcp_ho_size;
+    uint32_t targetSize = std::max(minHeaderSize, configuredSize);
+    uint32_t headerSize = std::min(p->GetSize(), targetSize);
     NS_ASSERT_MSG(headerSize > 0, "DCP HO packet cannot be created from an empty packet");
     std::vector<uint8_t> headerBytes(headerSize);
     p->CopyData(&headerBytes[0], headerSize);
@@ -336,6 +356,65 @@ void SwitchNode::UpdateDcpQueueStats(uint32_t outDev, uint32_t qIndex) {
         Settings::data_queue_len =
             std::max<uint64_t>(Settings::data_queue_len,
                                m_mmu->GetEgressQueueBytes(outDev, qIndex));
+    }
+}
+
+void SwitchNode::RecordDcpQueueDrop(uint8_t dcpType) {
+    switch (dcpType) {
+        case DcpTag::DCP_DATA:
+            Settings::dcp_data_dropped++;
+            break;
+        case DcpTag::DCP_ACK:
+            Settings::dcp_ack_dropped++;
+            break;
+        case DcpTag::DCP_HO:
+            Settings::dcp_ho_dropped++;
+            break;
+        default:
+            break;
+    }
+}
+
+SwitchNode::DcpAdmissionAction SwitchNode::EvaluateDcpAdmission(
+    uint8_t dcpType, bool enableDcp, bool dataQueueCandidate, uint64_t dataQueueBytes,
+    uint32_t packetSize, uint32_t trimThreshold) {
+    if (!enableDcp) {
+        return DCP_ADMISSION_BYPASS;
+    }
+    if (dcpType == DcpTag::DCP_HO) {
+        return DCP_ADMISSION_ENQUEUE_CONTROL;
+    }
+    if (!dataQueueCandidate) {
+        return DCP_ADMISSION_BYPASS;
+    }
+    if (dataQueueBytes + packetSize <= trimThreshold) {
+        return DCP_ADMISSION_ENQUEUE;
+    }
+    if (dcpType == DcpTag::DCP_DATA) {
+        return DCP_ADMISSION_TRIM_TO_HO;
+    }
+    if (dcpType == DcpTag::DCP_ACK) {
+        return DCP_ADMISSION_DROP_ACK;
+    }
+    return DCP_ADMISSION_DROP_NON;
+}
+
+const char *SwitchNode::DcpAdmissionActionToString(DcpAdmissionAction action) {
+    switch (action) {
+        case DCP_ADMISSION_BYPASS:
+            return "bypass";
+        case DCP_ADMISSION_ENQUEUE:
+            return "enqueue";
+        case DCP_ADMISSION_ENQUEUE_CONTROL:
+            return "enqueue_control";
+        case DCP_ADMISSION_TRIM_TO_HO:
+            return "trim_to_ho";
+        case DCP_ADMISSION_DROP_NON:
+            return "drop_non";
+        case DCP_ADMISSION_DROP_ACK:
+            return "drop_ack";
+        default:
+            return "unknown";
     }
 }
 
@@ -385,8 +464,8 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     FlowIdTag t;
     p->PeekPacketTag(t);
     uint32_t inDev = t.GetFlowId();
-    DcpTag dcpDataTag;
-    bool dcpDataPacket = IsDcpDataPacket(p, ch, &dcpDataTag);
+    DcpTag dcpTag;
+    uint8_t dcpType = ClassifyDcpPacket(p, ch, &dcpTag);
 
     /** NOTE:
      * ConWeave control packets have the high priority as ACK/NACK/PFC/etc with qIndex = 0.
@@ -396,29 +475,48 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
         assert(qIndex == 0 && m_ackHighPrio == 1 && "ConWeave's reply packet follows ACK, so its qIndex should be 0");
     }
 
-    if (qIndex != 0) {  // not highest priority
-        uint32_t dataQueueBytes = m_mmu->GetEgressQueueBytes(outDev, qIndex);
-        if (dcpDataPacket &&
-            (uint64_t)dataQueueBytes + p->GetSize() > Settings::dcp_trim_threshold) {
-            Ptr<Packet> ho = CreateDcpHoPacket(p, dcpDataTag);
-            Settings::dcp_trim_events++;
-            Settings::dcp_ho_generated++;
-            Settings::dcp_ho_packets++;
-            Settings::data_queue_len =
-                std::max<uint64_t>(Settings::data_queue_len, dataQueueBytes);
-            Ptr<QbbNetDevice> device = DynamicCast<QbbNetDevice>(m_devices[outDev]);
-            if (device != NULL && device->GetQueue() != NULL) {
-                Settings::control_queue_len =
-                    std::max<uint64_t>(Settings::control_queue_len,
-                                       device->GetQueue()->GetNBytes(0) + ho->GetSize());
-            }
-            if (!m_devices[outDev]->SwitchSend(0, ho, ch)) {
-                Settings::dcp_ho_dropped++;
-            }
-            UpdateDcpQueueStats(outDev, 0);
-            return;
-        }
+    uint32_t dataQueueIndex = GetDcpDataQueueIndex(ch, qIndex);
+    bool dataQueueCandidate = (qIndex != 0 || dcpType == DcpTag::DCP_DATA ||
+                               dcpType == DcpTag::DCP_ACK);
+    uint32_t dataQueueBytes =
+        dataQueueIndex == 0 ? 0 : m_mmu->GetEgressQueueBytes(outDev, dataQueueIndex);
+    DcpAdmissionAction dcpAdmission =
+        EvaluateDcpAdmission(dcpType, Settings::enable_dcp, dataQueueCandidate, dataQueueBytes,
+                             p->GetSize(), Settings::dcp_trim_threshold);
 
+    if (dcpAdmission == DCP_ADMISSION_ENQUEUE_CONTROL) {
+        qIndex = 0;
+    } else if (dcpAdmission == DCP_ADMISSION_TRIM_TO_HO) {
+        Ptr<Packet> ho = CreateDcpHoPacket(p, dcpTag);
+        Settings::dcp_trim_events++;
+        Settings::dcp_ho_generated++;
+        Settings::dcp_ho_packets++;
+        Settings::dcp_ho_bytes += ho->GetSize();
+        Settings::dcp_data_bytes_trimmed +=
+            p->GetSize() > ho->GetSize() ? p->GetSize() - ho->GetSize() : 0;
+        Settings::data_queue_len = std::max<uint64_t>(Settings::data_queue_len, dataQueueBytes);
+        Ptr<QbbNetDevice> device = DynamicCast<QbbNetDevice>(m_devices[outDev]);
+        if (device != NULL && device->GetQueue() != NULL) {
+            Settings::control_queue_len =
+                std::max<uint64_t>(Settings::control_queue_len,
+                                   device->GetQueue()->GetNBytes(0) + ho->GetSize());
+        }
+        if (!m_devices[outDev]->SwitchSend(0, ho, ch)) {
+            Settings::dcp_ho_dropped++;
+        }
+        UpdateDcpQueueStats(outDev, 0);
+        return;
+    } else if (dcpAdmission == DCP_ADMISSION_DROP_NON) {
+        Settings::dcp_non_dropped++;
+        Settings::dropped_pkt_sw_egress++;
+        return;
+    } else if (dcpAdmission == DCP_ADMISSION_DROP_ACK) {
+        Settings::dcp_ack_dropped++;
+        Settings::dropped_pkt_sw_egress++;
+        return;
+    }
+
+    if (qIndex != 0) {  // not highest priority
         if (m_mmu->CheckEgressAdmission(outDev, qIndex,
                                         p->GetSize())) {  // Egress Admission control
             if (m_mmu->CheckIngressAdmission(inDev, qIndex,
@@ -434,9 +532,7 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
                 //           << ",At " << Simulator::Now() << std::endl;
 #endif
                 Settings::dropped_pkt_sw_ingress++;
-                if (dcpDataPacket) {
-                    Settings::dcp_data_dropped++;
-                }
+                RecordDcpQueueDrop(dcpType);
                 return;  // drop
             }
         } else { /** DROP: At Egress */
@@ -447,9 +543,7 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
             //           << Simulator::Now() << std::endl;
 #endif
             Settings::dropped_pkt_sw_egress++;
-            if (dcpDataPacket) {
-                Settings::dcp_data_dropped++;
-            }
+            RecordDcpQueueDrop(dcpType);
             return;  // drop
         }
 
@@ -457,9 +551,7 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     }
 
     if (!m_devices[outDev]->SwitchSend(qIndex, p, ch)) {
-        if (dcpDataPacket) {
-            Settings::dcp_data_dropped++;
-        }
+        RecordDcpQueueDrop(dcpType);
     }
     UpdateDcpQueueStats(outDev, qIndex);
 }

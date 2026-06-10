@@ -159,9 +159,14 @@ class Settings {
     static uint64_t dcp_completed_messages;
     static uint64_t dcp_ho_dropped;
     static uint64_t dcp_data_dropped;
+    static uint64_t dcp_non_dropped;
+    static uint64_t dcp_ack_dropped;
+    static uint64_t dcp_ho_bytes;
+    static uint64_t dcp_data_bytes_trimmed;
     static uint64_t control_queue_len;
     static uint64_t data_queue_len;
     static uint32_t dcp_trim_threshold;
+    static uint32_t dcp_ho_size;
     static uint32_t dcp_retrans_per_round;
     static bool dcp_enable_timeout_retx;
 };

@@ -53,9 +53,11 @@ class SwitchNode : public Node {
 
     /* Sending packet to Egress port */
     void DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, uint32_t qIndex);
-    bool IsDcpDataPacket(Ptr<Packet> p, const CustomHeader &ch, DcpTag *tag) const;
+    uint8_t ClassifyDcpPacket(Ptr<Packet> p, const CustomHeader &ch, DcpTag *tag) const;
+    uint32_t GetDcpDataQueueIndex(const CustomHeader &ch, uint32_t qIndex) const;
     Ptr<Packet> CreateDcpHoPacket(Ptr<Packet> p, const DcpTag &dataTag) const;
     void UpdateDcpQueueStats(uint32_t outDev, uint32_t qIndex);
+    void RecordDcpQueueDrop(uint8_t dcpType);
     void UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p);
     uint8_t ClassifyBccState(uint32_t ifIndex, const BccPortState &state) const;
 
@@ -81,6 +83,15 @@ class SwitchNode : public Node {
                           const std::vector<int> &nexthops);
 
    public:
+    enum DcpAdmissionAction {
+        DCP_ADMISSION_BYPASS = 0,
+        DCP_ADMISSION_ENQUEUE,
+        DCP_ADMISSION_ENQUEUE_CONTROL,
+        DCP_ADMISSION_TRIM_TO_HO,
+        DCP_ADMISSION_DROP_NON,
+        DCP_ADMISSION_DROP_ACK
+    };
+
     // Ptr<BroadcomNode> m_broadcom;
     Ptr<SwitchMmu> m_mmu;
     bool m_isToR;                                 // true if ToR switch
@@ -99,6 +110,12 @@ class SwitchNode : public Node {
                                       uint32_t k2, double queueSlope, double linkUtilization,
                                       double slopeThreshold, double utilizationThreshold);
     static const char *BccStateToString(uint8_t state);
+    static DcpAdmissionAction EvaluateDcpAdmission(uint8_t dcpType, bool enableDcp,
+                                                   bool dataQueueCandidate,
+                                                   uint64_t dataQueueBytes,
+                                                   uint32_t packetSize,
+                                                   uint32_t trimThreshold);
+    static const char *DcpAdmissionActionToString(DcpAdmissionAction action);
 
    private:
     BccPortState m_bccPortState[pCnt];
