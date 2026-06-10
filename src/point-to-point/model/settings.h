@@ -124,6 +124,10 @@ class Settings {
     // for common setting
     static uint32_t packet_payload;
 
+    // DCP skeleton config. Stage 1 only exposes config/stat plumbing.
+    static bool enable_dcp;
+    static std::string transport_mode;
+
     // for statistic
     static uint32_t node_num;
     static uint32_t host_num;
@@ -137,6 +141,19 @@ class Settings {
 
     static uint32_t dropped_pkt_sw_ingress;
     static uint32_t dropped_pkt_sw_egress;
+
+    static uint64_t dcp_data_packets;
+    static uint64_t dcp_ack_packets;
+    static uint64_t dcp_ho_packets;
+    static uint64_t dcp_trim_events;
+    static uint64_t dcp_ho_generated;
+    static uint64_t dcp_ho_returned;
+    static uint64_t dcp_precise_retx;
+    static uint64_t dcp_spurious_retx;
+    static uint64_t dcp_timeout_retx;
+    static uint64_t dcp_ooo_packets;
+    static uint64_t dcp_completed_messages;
+    static uint64_t dcp_ho_dropped;
 };
 
 }  // namespace ns3

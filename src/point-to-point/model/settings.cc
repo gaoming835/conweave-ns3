@@ -22,8 +22,24 @@ uint32_t Settings::switch_num = 0;
 uint64_t Settings::cnt_finished_flows = 0;
 uint32_t Settings::packet_payload = 1000;
 
+bool Settings::enable_dcp = false;
+std::string Settings::transport_mode = "rdma";
+
 uint32_t Settings::dropped_pkt_sw_ingress = 0;
 uint32_t Settings::dropped_pkt_sw_egress = 0;
+
+uint64_t Settings::dcp_data_packets = 0;
+uint64_t Settings::dcp_ack_packets = 0;
+uint64_t Settings::dcp_ho_packets = 0;
+uint64_t Settings::dcp_trim_events = 0;
+uint64_t Settings::dcp_ho_generated = 0;
+uint64_t Settings::dcp_ho_returned = 0;
+uint64_t Settings::dcp_precise_retx = 0;
+uint64_t Settings::dcp_spurious_retx = 0;
+uint64_t Settings::dcp_timeout_retx = 0;
+uint64_t Settings::dcp_ooo_packets = 0;
+uint64_t Settings::dcp_completed_messages = 0;
+uint64_t Settings::dcp_ho_dropped = 0;
 
 /* for load balancer */
 std::map<uint32_t, uint32_t> Settings::hostIp2SwitchId;

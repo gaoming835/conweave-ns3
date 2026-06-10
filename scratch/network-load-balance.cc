@@ -118,6 +118,7 @@ std::string rate_mon_file = "rate.txt";
 std::string source_rate_mon_file = "source_rate.txt";
 std::string bcc_state_mon_file = "bcc_state.txt";
 std::string bcc_tcm_mon_file = "bcc_tcm.txt";
+std::string dcp_stats_file = "dcp_stats.txt";
 std::string voq_mon_file = "voq.txt";
 std::string voq_mon_detail_file = "voq_detail.txt";
 std::string uplink_mon_file = "uplink.txt";
@@ -628,6 +629,28 @@ void conweave_history_print() {
         ConWeaveVOQ::m_flushEstErrorhistory.clear();
         std::cout << "---------D O N E---------" << std::endl;
     }
+}
+
+void dcp_stats_print() {
+    FILE *fout = fopen(dcp_stats_file.c_str(), "w");
+    if (fout == NULL) {
+        std::cerr << "ERROR - failed to open DCP_STATS_FILE: " << dcp_stats_file << std::endl;
+        return;
+    }
+    fprintf(fout, "field,value\n");
+    fprintf(fout, "dcp_data_packets,%lu\n", Settings::dcp_data_packets);
+    fprintf(fout, "dcp_ack_packets,%lu\n", Settings::dcp_ack_packets);
+    fprintf(fout, "dcp_ho_packets,%lu\n", Settings::dcp_ho_packets);
+    fprintf(fout, "dcp_trim_events,%lu\n", Settings::dcp_trim_events);
+    fprintf(fout, "dcp_ho_generated,%lu\n", Settings::dcp_ho_generated);
+    fprintf(fout, "dcp_ho_returned,%lu\n", Settings::dcp_ho_returned);
+    fprintf(fout, "dcp_precise_retx,%lu\n", Settings::dcp_precise_retx);
+    fprintf(fout, "dcp_spurious_retx,%lu\n", Settings::dcp_spurious_retx);
+    fprintf(fout, "dcp_timeout_retx,%lu\n", Settings::dcp_timeout_retx);
+    fprintf(fout, "dcp_ooo_packets,%lu\n", Settings::dcp_ooo_packets);
+    fprintf(fout, "dcp_completed_messages,%lu\n", Settings::dcp_completed_messages);
+    fprintf(fout, "dcp_ho_dropped,%lu\n", Settings::dcp_ho_dropped);
+    fclose(fout);
 }
 
 /**
@@ -1220,6 +1243,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("BCC_TCM_MON_FILE") == 0) {
                 conf >> bcc_tcm_mon_file;
                 std::cerr << "BCC_TCM_MON_FILE\t\t\t\t" << bcc_tcm_mon_file << '\n';
+            } else if (key.compare("DCP_STATS_FILE") == 0) {
+                conf >> dcp_stats_file;
+                std::cerr << "DCP_STATS_FILE\t\t\t\t" << dcp_stats_file << '\n';
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';
@@ -1253,6 +1279,20 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 enable_bcc = v;
                 std::cerr << "ENABLE_BCC\t\t" << enable_bcc << "\n";
+            } else if (key.compare("ENABLE_DCP") == 0) {
+                bool v;
+                conf >> v;
+                Settings::enable_dcp = v;
+                if (Settings::enable_dcp) {
+                    Settings::transport_mode = "dcp";
+                }
+                std::cerr << "ENABLE_DCP\t\t" << Settings::enable_dcp << "\n";
+            } else if (key.compare("TRANSPORT_MODE") == 0) {
+                conf >> Settings::transport_mode;
+                if (Settings::transport_mode == "dcp") {
+                    Settings::enable_dcp = true;
+                }
+                std::cerr << "TRANSPORT_MODE\t\t" << Settings::transport_mode << "\n";
             } else if (key.compare("ACK_HIGH_PRIO") == 0) {
                 conf >> ack_high_prio;
                 std::cerr << "ACK_HIGH_PRIO\t\t" << ack_high_prio << "\n";
@@ -1307,6 +1347,10 @@ int main(int argc, char *argv[]) {
     }
     if (enable_bcc && ack_high_prio == 0) {
         std::cerr << "CONFIG ERROR : BCC feedback uses ACKs, so ACK_HIGH_PRIO must be 1.\n";
+        exit(1);
+    }
+    if (Settings::transport_mode != "rdma" && Settings::transport_mode != "dcp") {
+        std::cerr << "CONFIG ERROR : TRANSPORT_MODE must be rdma or dcp.\n";
         exit(1);
     }
 
@@ -2029,6 +2073,9 @@ int main(int argc, char *argv[]) {
                         &stop_simulation_middle);  // check every 100us
     Simulator::Stop(Seconds(flowgen_stop_time + 10.0));
     Simulator::Run();
+    if (Settings::enable_dcp) {
+        dcp_stats_print();
+    }
 
     /*-----------------------------------------------------------------------------*/
     /*----- we don't need below. Just we can enforce to close this simulation. -----*/

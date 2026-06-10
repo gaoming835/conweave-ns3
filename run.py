@@ -84,7 +84,7 @@ SAMPLE_FEEDBACK 0
 
 ENABLE_QCN 1
 ENABLE_BCC {enable_bcc}
-ACK_HIGH_PRIO {ack_high_prio}
+{dcp_config_block}ACK_HIGH_PRIO {ack_high_prio}
 BCC_U {bcc_u}
 BCC_S {bcc_s}
 BCC_CONTROL_PERIOD {bcc_control_period}
@@ -177,6 +177,16 @@ def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
             "CONFIG ERROR : BCC feedback is carried by ACKs, so ACK_HIGH_PRIO must be 1.")
 
 
+def build_dcp_config_block(enable_dcp, config_id):
+    if not enable_dcp:
+        return ""
+    return (
+        "ENABLE_DCP 1\n"
+        "TRANSPORT_MODE dcp\n"
+        "DCP_STATS_FILE mix/output/{id}/{id}_out_dcp_stats.txt\n"
+    ).format(id=config_id)
+
+
 def main():
     # make directory if not exists
     isExist = os.path.exists(os.getcwd() + "/mix/output/")
@@ -223,6 +233,8 @@ def main():
                         type=float, default=4, help="DCQCN rate decrease interval Td in us (default preserves existing config: 4)")
     parser.add_argument('--enable_bcc', dest='enable_bcc', action='store',
                         type=int, default=0, help="enable BCC switch-side packet tagging (default: 0)")
+    parser.add_argument('--transport', dest='transport', action='store',
+                        default='rdma', help="transport mode: rdma/dcp (default: rdma)")
     parser.add_argument('--ack_high_prio', dest='ack_high_prio', action='store',
                         type=int, default=1, help="set high priority for ACK/NACK packets (default: 1)")
     parser.add_argument('--bcc_u', dest='bcc_u', action='store',
@@ -259,6 +271,16 @@ def main():
     while (isExist):
         config_ID = str(random.randrange(MAX_RAND_RANGE))
         isExist = os.path.exists(os.getcwd() + "/mix/output/" + config_ID)
+
+    if args.transport not in ("rdma", "dcp"):
+        raise Exception("CONFIG ERROR : --transport must be rdma or dcp.")
+    enable_dcp = int(args.transport == "dcp")
+    if enable_dcp:
+        args.transport = "dcp"
+        if args.cc == "dcqcn":
+            print("CONFIG INFO : DCP skeleton currently reuses DCQCN transport behavior.")
+        elif args.cc != "bcc":
+            raise Exception("CONFIG ERROR : DCP skeleton currently supports --cc dcqcn or --cc bcc.")
 
     # input parameters
     cc_mode = cc_modes[args.cc]
@@ -483,6 +505,7 @@ def main():
                                         alpha_resume_interval=args.dcqcn_ti_us,
                                         rate_decrease_interval=args.dcqcn_td_us,
                                         enable_bcc=enable_bcc,
+                                        dcp_config_block=build_dcp_config_block(enable_dcp, config_ID),
                                         ack_high_prio=ack_high_prio,
                                         bcc_u=args.bcc_u,
                                         bcc_s=args.bcc_s,
