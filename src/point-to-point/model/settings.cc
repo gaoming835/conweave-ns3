@@ -40,6 +40,10 @@ uint64_t Settings::dcp_timeout_retx = 0;
 uint64_t Settings::dcp_ooo_packets = 0;
 uint64_t Settings::dcp_completed_messages = 0;
 uint64_t Settings::dcp_ho_dropped = 0;
+uint64_t Settings::dcp_data_dropped = 0;
+uint64_t Settings::control_queue_len = 0;
+uint64_t Settings::data_queue_len = 0;
+uint32_t Settings::dcp_trim_threshold = 0xffffffff;
 
 /* for load balancer */
 std::map<uint32_t, uint32_t> Settings::hostIp2SwitchId;

@@ -3,8 +3,11 @@
 #include "assert.h"
 #include "ns3/boolean.h"
 #include "ns3/conweave-routing.h"
+#include "ns3/dcp-tag.h"
 #include "ns3/double.h"
 #include "ns3/flow-id-tag.h"
+#include "ns3/flow-id-num-tag.h"
+#include "ns3/flow-stat-tag.h"
 #include "ns3/int-header.h"
 #include "ns3/ipv4-header.h"
 #include "ns3/ipv4.h"
@@ -264,6 +267,63 @@ void SwitchNode::SendToDevContinue(Ptr<Packet> p, CustomHeader &ch) {
     return;  // Drop otherwise
 }
 
+bool SwitchNode::IsDcpDataPacket(Ptr<Packet> p, DcpTag *tag) const {
+    if (!Settings::enable_dcp) {
+        return false;
+    }
+    DcpTag dcpTag;
+    if (!p->PeekPacketTag(dcpTag)) {
+        return false;
+    }
+    if (dcpTag.GetPacketType() != DcpTag::DCP_DATA) {
+        return false;
+    }
+    if (tag != NULL) {
+        *tag = dcpTag;
+    }
+    return true;
+}
+
+Ptr<Packet> SwitchNode::CreateDcpHoPacket(Ptr<Packet> p, const DcpTag &dataTag) const {
+    uint32_t headerSize = std::min(p->GetSize(), CustomHeader::GetStaticWholeHeaderSize());
+    NS_ASSERT_MSG(headerSize > 0, "DCP HO packet cannot be created from an empty packet");
+    std::vector<uint8_t> headerBytes(headerSize);
+    p->CopyData(&headerBytes[0], headerSize);
+    Ptr<Packet> ho = Create<Packet>(&headerBytes[0], headerSize);
+
+    FlowIdTag flowTag;
+    if (p->PeekPacketTag(flowTag)) {
+        ho->AddPacketTag(flowTag);
+    }
+    FlowIDNUMTag flowNumTag;
+    if (p->PeekPacketTag(flowNumTag)) {
+        ho->AddPacketTag(flowNumTag);
+    }
+    FlowStatTag flowStatTag;
+    if (p->PeekPacketTag(flowStatTag)) {
+        ho->AddPacketTag(flowStatTag);
+    }
+
+    DcpTag hoTag = dataTag;
+    hoTag.SetPacketType(DcpTag::DCP_HO);
+    ho->AddPacketTag(hoTag);
+    return ho;
+}
+
+void SwitchNode::UpdateDcpQueueStats(uint32_t outDev, uint32_t qIndex) {
+    Ptr<QbbNetDevice> device = DynamicCast<QbbNetDevice>(m_devices[outDev]);
+    if (device == NULL || device->GetQueue() == NULL) {
+        return;
+    }
+    Settings::control_queue_len =
+        std::max<uint64_t>(Settings::control_queue_len, device->GetQueue()->GetNBytes(0));
+    if (qIndex != 0) {
+        Settings::data_queue_len =
+            std::max<uint64_t>(Settings::data_queue_len,
+                               m_mmu->GetEgressQueueBytes(outDev, qIndex));
+    }
+}
+
 int SwitchNode::GetOutDev(Ptr<Packet> p, CustomHeader &ch) {
     // look up entries
     auto entry = m_rtTable.find(ch.dip);
@@ -310,6 +370,8 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     FlowIdTag t;
     p->PeekPacketTag(t);
     uint32_t inDev = t.GetFlowId();
+    DcpTag dcpDataTag;
+    bool dcpDataPacket = IsDcpDataPacket(p, &dcpDataTag);
 
     /** NOTE:
      * ConWeave control packets have the high priority as ACK/NACK/PFC/etc with qIndex = 0.
@@ -320,6 +382,28 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     }
 
     if (qIndex != 0) {  // not highest priority
+        uint32_t dataQueueBytes = m_mmu->GetEgressQueueBytes(outDev, qIndex);
+        if (dcpDataPacket &&
+            (uint64_t)dataQueueBytes + p->GetSize() > Settings::dcp_trim_threshold) {
+            Ptr<Packet> ho = CreateDcpHoPacket(p, dcpDataTag);
+            Settings::dcp_trim_events++;
+            Settings::dcp_ho_generated++;
+            Settings::dcp_ho_packets++;
+            Settings::data_queue_len =
+                std::max<uint64_t>(Settings::data_queue_len, dataQueueBytes);
+            Ptr<QbbNetDevice> device = DynamicCast<QbbNetDevice>(m_devices[outDev]);
+            if (device != NULL && device->GetQueue() != NULL) {
+                Settings::control_queue_len =
+                    std::max<uint64_t>(Settings::control_queue_len,
+                                       device->GetQueue()->GetNBytes(0) + ho->GetSize());
+            }
+            if (!m_devices[outDev]->SwitchSend(0, ho, ch)) {
+                Settings::dcp_ho_dropped++;
+            }
+            UpdateDcpQueueStats(outDev, 0);
+            return;
+        }
+
         if (m_mmu->CheckEgressAdmission(outDev, qIndex,
                                         p->GetSize())) {  // Egress Admission control
             if (m_mmu->CheckIngressAdmission(inDev, qIndex,
@@ -335,6 +419,9 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
                 //           << ",At " << Simulator::Now() << std::endl;
 #endif
                 Settings::dropped_pkt_sw_ingress++;
+                if (dcpDataPacket) {
+                    Settings::dcp_data_dropped++;
+                }
                 return;  // drop
             }
         } else { /** DROP: At Egress */
@@ -345,13 +432,21 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
             //           << Simulator::Now() << std::endl;
 #endif
             Settings::dropped_pkt_sw_egress++;
+            if (dcpDataPacket) {
+                Settings::dcp_data_dropped++;
+            }
             return;  // drop
         }
 
         CheckAndSendPfc(inDev, qIndex);
     }
 
-    m_devices[outDev]->SwitchSend(qIndex, p, ch);
+    if (!m_devices[outDev]->SwitchSend(qIndex, p, ch)) {
+        if (dcpDataPacket) {
+            Settings::dcp_data_dropped++;
+        }
+    }
+    UpdateDcpQueueStats(outDev, qIndex);
 }
 
 static void SetBccEcnBits(Ptr<Packet> p, uint8_t state) {

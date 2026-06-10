@@ -177,14 +177,15 @@ def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
             "CONFIG ERROR : BCC feedback is carried by ACKs, so ACK_HIGH_PRIO must be 1.")
 
 
-def build_dcp_config_block(enable_dcp, config_id):
+def build_dcp_config_block(enable_dcp, config_id, trim_threshold):
     if not enable_dcp:
         return ""
     return (
         "ENABLE_DCP 1\n"
         "TRANSPORT_MODE dcp\n"
         "DCP_STATS_FILE mix/output/{id}/{id}_out_dcp_stats.txt\n"
-    ).format(id=config_id)
+        "DCP_TRIM_THRESHOLD {trim_threshold}\n"
+    ).format(id=config_id, trim_threshold=trim_threshold)
 
 
 def main():
@@ -235,6 +236,9 @@ def main():
                         type=int, default=0, help="enable BCC switch-side packet tagging (default: 0)")
     parser.add_argument('--transport', dest='transport', action='store',
                         default='rdma', help="transport mode: rdma/dcp (default: rdma)")
+    parser.add_argument('--dcp_trim_threshold', dest='dcp_trim_threshold', action='store',
+                        type=int, default=0xffffffff,
+                        help="DCP egress data queue trim threshold in bytes (default: disabled)")
     parser.add_argument('--ack_high_prio', dest='ack_high_prio', action='store',
                         type=int, default=1, help="set high priority for ACK/NACK packets (default: 1)")
     parser.add_argument('--bcc_u', dest='bcc_u', action='store',
@@ -505,7 +509,8 @@ def main():
                                         alpha_resume_interval=args.dcqcn_ti_us,
                                         rate_decrease_interval=args.dcqcn_td_us,
                                         enable_bcc=enable_bcc,
-                                        dcp_config_block=build_dcp_config_block(enable_dcp, config_ID),
+                                        dcp_config_block=build_dcp_config_block(
+                                            enable_dcp, config_ID, args.dcp_trim_threshold),
                                         ack_high_prio=ack_high_prio,
                                         bcc_u=args.bcc_u,
                                         bcc_s=args.bcc_s,

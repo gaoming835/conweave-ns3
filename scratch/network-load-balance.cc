@@ -650,6 +650,9 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_ooo_packets,%lu\n", Settings::dcp_ooo_packets);
     fprintf(fout, "dcp_completed_messages,%lu\n", Settings::dcp_completed_messages);
     fprintf(fout, "dcp_ho_dropped,%lu\n", Settings::dcp_ho_dropped);
+    fprintf(fout, "dcp_data_dropped,%lu\n", Settings::dcp_data_dropped);
+    fprintf(fout, "control_queue_len,%lu\n", Settings::control_queue_len);
+    fprintf(fout, "data_queue_len,%lu\n", Settings::data_queue_len);
     fclose(fout);
 }
 
@@ -1246,6 +1249,9 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("DCP_STATS_FILE") == 0) {
                 conf >> dcp_stats_file;
                 std::cerr << "DCP_STATS_FILE\t\t\t\t" << dcp_stats_file << '\n';
+            } else if (key.compare("DCP_TRIM_THRESHOLD") == 0) {
+                conf >> Settings::dcp_trim_threshold;
+                std::cerr << "DCP_TRIM_THRESHOLD\t\t" << Settings::dcp_trim_threshold << "\n";
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';

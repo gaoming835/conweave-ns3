@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 #include "bcc-tag.h"
+#include "dcp-tag.h"
 #include "qbb-net-device.h"
 #include "switch-mmu.h"
 
@@ -52,6 +53,9 @@ class SwitchNode : public Node {
 
     /* Sending packet to Egress port */
     void DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, uint32_t qIndex);
+    bool IsDcpDataPacket(Ptr<Packet> p, DcpTag *tag) const;
+    Ptr<Packet> CreateDcpHoPacket(Ptr<Packet> p, const DcpTag &dataTag) const;
+    void UpdateDcpQueueStats(uint32_t outDev, uint32_t qIndex);
     void UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p);
     uint8_t ClassifyBccState(uint32_t ifIndex, const BccPortState &state) const;
 

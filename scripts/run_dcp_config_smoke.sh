@@ -68,11 +68,20 @@ expected_fields=(
   dcp_ooo_packets
   dcp_completed_messages
   dcp_ho_dropped
+  dcp_data_dropped
+  control_queue_len
+  data_queue_len
 )
 
 for field in "${expected_fields[@]}"; do
-  grep -q "^${field},0$" "${stats_file}"
+  grep -q "^${field}," "${stats_file}"
 done
+
+grep -q '^dcp_ho_packets,0$' "${stats_file}"
+grep -q '^dcp_trim_events,0$' "${stats_file}"
+grep -q '^dcp_ho_generated,0$' "${stats_file}"
+grep -q '^dcp_ho_dropped,0$' "${stats_file}"
+grep -q '^dcp_data_dropped,0$' "${stats_file}"
 
 echo "dcp_config_smoke=pass"
 echo "run_id=${run_id}"

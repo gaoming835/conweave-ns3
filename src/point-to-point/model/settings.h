@@ -154,6 +154,10 @@ class Settings {
     static uint64_t dcp_ooo_packets;
     static uint64_t dcp_completed_messages;
     static uint64_t dcp_ho_dropped;
+    static uint64_t dcp_data_dropped;
+    static uint64_t control_queue_len;
+    static uint64_t data_queue_len;
+    static uint32_t dcp_trim_threshold;
 };
 
 }  // namespace ns3

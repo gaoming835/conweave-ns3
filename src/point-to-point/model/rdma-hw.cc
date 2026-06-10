@@ -312,6 +312,14 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
 
     uint32_t payload_size = p->GetSize() - ch.GetSerializedSize();
 
+    if (Settings::enable_dcp) {
+        DcpTag dcpTag;
+        if (p->PeekPacketTag(dcpTag) && dcpTag.GetPacketType() == DcpTag::DCP_HO) {
+            Settings::dcp_ho_returned++;
+            return 1;
+        }
+    }
+
     // find corresponding rx queue pair
     Ptr<RdmaRxQueuePair> rxQp =
         GetRxQp(ch.dip, ch.sip, ch.udp.dport, ch.udp.sport, ch.udp.pg, true);
