@@ -54,6 +54,9 @@ grep -q '^ENABLE_DCP 1$' "${run_dir}/config.txt"
 grep -q '^TRANSPORT_MODE dcp$' "${run_dir}/config.txt"
 grep -q '^DCP_STATS_FILE ' "${run_dir}/config.txt"
 grep -q '^DCP_HO_SIZE 0$' "${run_dir}/config.txt"
+grep -q '^DCP_ENABLE_WRR 0$' "${run_dir}/config.txt"
+grep -q '^DCP_CONTROL_WEIGHT 1$' "${run_dir}/config.txt"
+grep -q '^DCP_DATA_WEIGHT 1$' "${run_dir}/config.txt"
 test -f "${stats_file}"
 
 expected_fields=(
@@ -80,6 +83,22 @@ expected_fields=(
   dcp_data_bytes_trimmed
   control_queue_len
   data_queue_len
+  dcp_enable_wrr
+  dcp_control_weight
+  dcp_data_weight
+  dcp_inc_scale_n
+  dcp_ho_data_ratio_r
+  dcp_control_queue_max_len
+  dcp_data_queue_max_len
+  dcp_control_queue_avg_len
+  dcp_data_queue_avg_len
+  dcp_queue_samples
+  dcp_control_queue_drops
+  dcp_data_queue_drops
+  dcp_control_dequeue_packets
+  dcp_data_dequeue_packets
+  dcp_control_dequeue_bytes
+  dcp_data_dequeue_bytes
 )
 
 for field in "${expected_fields[@]}"; do
@@ -97,6 +116,9 @@ grep -q '^dcp_non_dropped,0$' "${stats_file}"
 grep -q '^dcp_ack_dropped,0$' "${stats_file}"
 grep -q '^dcp_ho_bytes,0$' "${stats_file}"
 grep -q '^dcp_data_bytes_trimmed,0$' "${stats_file}"
+grep -q '^dcp_enable_wrr,0$' "${stats_file}"
+grep -q '^dcp_control_weight,1$' "${stats_file}"
+grep -q '^dcp_data_weight,1$' "${stats_file}"
 
 echo "dcp_config_smoke=pass"
 echo "run_id=${run_id}"

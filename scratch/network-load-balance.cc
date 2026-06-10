@@ -661,6 +661,28 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_data_bytes_trimmed,%lu\n", Settings::dcp_data_bytes_trimmed);
     fprintf(fout, "control_queue_len,%lu\n", Settings::control_queue_len);
     fprintf(fout, "data_queue_len,%lu\n", Settings::data_queue_len);
+    fprintf(fout, "dcp_enable_wrr,%u\n", Settings::dcp_enable_wrr ? 1 : 0);
+    fprintf(fout, "dcp_control_weight,%u\n", Settings::dcp_control_weight);
+    fprintf(fout, "dcp_data_weight,%u\n", Settings::dcp_data_weight);
+    fprintf(fout, "dcp_inc_scale_n,%u\n", Settings::dcp_inc_scale_n);
+    fprintf(fout, "dcp_ho_data_ratio_r,%.6f\n", Settings::dcp_ho_data_ratio_r);
+    fprintf(fout, "dcp_control_queue_max_len,%lu\n", Settings::dcp_control_queue_max_len);
+    fprintf(fout, "dcp_data_queue_max_len,%lu\n", Settings::dcp_data_queue_max_len);
+    fprintf(fout, "dcp_control_queue_avg_len,%.6f\n",
+            Settings::dcp_queue_samples == 0
+                ? 0.0
+                : (double)Settings::dcp_control_queue_sum_len / Settings::dcp_queue_samples);
+    fprintf(fout, "dcp_data_queue_avg_len,%.6f\n",
+            Settings::dcp_queue_samples == 0
+                ? 0.0
+                : (double)Settings::dcp_data_queue_sum_len / Settings::dcp_queue_samples);
+    fprintf(fout, "dcp_queue_samples,%lu\n", Settings::dcp_queue_samples);
+    fprintf(fout, "dcp_control_queue_drops,%lu\n", Settings::dcp_control_queue_drops);
+    fprintf(fout, "dcp_data_queue_drops,%lu\n", Settings::dcp_data_queue_drops);
+    fprintf(fout, "dcp_control_dequeue_packets,%lu\n", Settings::dcp_control_dequeue_packets);
+    fprintf(fout, "dcp_data_dequeue_packets,%lu\n", Settings::dcp_data_dequeue_packets);
+    fprintf(fout, "dcp_control_dequeue_bytes,%lu\n", Settings::dcp_control_dequeue_bytes);
+    fprintf(fout, "dcp_data_dequeue_bytes,%lu\n", Settings::dcp_data_dequeue_bytes);
     fclose(fout);
 }
 
@@ -1273,6 +1295,27 @@ int main(int argc, char *argv[]) {
                 conf >> Settings::dcp_enable_timeout_retx;
                 std::cerr << "DCP_ENABLE_TIMEOUT_RETX\t\t" << Settings::dcp_enable_timeout_retx
                           << "\n";
+            } else if (key.compare("DCP_ENABLE_WRR") == 0) {
+                conf >> Settings::dcp_enable_wrr;
+                std::cerr << "DCP_ENABLE_WRR\t\t\t" << Settings::dcp_enable_wrr << "\n";
+            } else if (key.compare("DCP_CONTROL_WEIGHT") == 0) {
+                conf >> Settings::dcp_control_weight;
+                std::cerr << "DCP_CONTROL_WEIGHT\t\t" << Settings::dcp_control_weight << "\n";
+            } else if (key.compare("DCP_DATA_WEIGHT") == 0) {
+                conf >> Settings::dcp_data_weight;
+                std::cerr << "DCP_DATA_WEIGHT\t\t\t" << Settings::dcp_data_weight << "\n";
+            } else if (key.compare("DCP_INC_SCALE_N") == 0) {
+                conf >> Settings::dcp_inc_scale_n;
+                if (Settings::dcp_inc_scale_n == 0) {
+                    Settings::dcp_inc_scale_n = 1;
+                }
+                std::cerr << "DCP_INC_SCALE_N\t\t\t" << Settings::dcp_inc_scale_n << "\n";
+            } else if (key.compare("DCP_HO_DATA_RATIO_R") == 0) {
+                conf >> Settings::dcp_ho_data_ratio_r;
+                if (Settings::dcp_ho_data_ratio_r < 0.0) {
+                    Settings::dcp_ho_data_ratio_r = 0.0;
+                }
+                std::cerr << "DCP_HO_DATA_RATIO_R\t\t" << Settings::dcp_ho_data_ratio_r << "\n";
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';

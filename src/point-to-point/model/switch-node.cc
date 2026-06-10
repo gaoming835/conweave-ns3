@@ -363,12 +363,15 @@ void SwitchNode::RecordDcpQueueDrop(uint8_t dcpType) {
     switch (dcpType) {
         case DcpTag::DCP_DATA:
             Settings::dcp_data_dropped++;
+            Settings::dcp_data_queue_drops++;
             break;
         case DcpTag::DCP_ACK:
             Settings::dcp_ack_dropped++;
+            Settings::dcp_data_queue_drops++;
             break;
         case DcpTag::DCP_HO:
             Settings::dcp_ho_dropped++;
+            Settings::dcp_control_queue_drops++;
             break;
         default:
             break;
@@ -508,10 +511,12 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
         return;
     } else if (dcpAdmission == DCP_ADMISSION_DROP_NON) {
         Settings::dcp_non_dropped++;
+        Settings::dcp_data_queue_drops++;
         Settings::dropped_pkt_sw_egress++;
         return;
     } else if (dcpAdmission == DCP_ADMISSION_DROP_ACK) {
         Settings::dcp_ack_dropped++;
+        Settings::dcp_data_queue_drops++;
         Settings::dropped_pkt_sw_egress++;
         return;
     }

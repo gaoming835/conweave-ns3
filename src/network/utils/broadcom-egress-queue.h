@@ -40,6 +40,7 @@ namespace ns3 {
 		virtual ~BEgressQueue();
 		bool Enqueue(Ptr<Packet> p, uint32_t qIndex);
 		Ptr<Packet> DequeueRR(bool paused[]);
+		Ptr<Packet> DequeueDcpWrr(bool paused[], uint32_t controlWeight, uint32_t dataWeight);
 		uint32_t GetNBytes(uint32_t qIndex) const;
 		uint32_t GetNBytesTotal() const;
 		uint32_t GetLastQueue();
@@ -52,6 +53,10 @@ namespace ns3 {
 	private:
 		bool DoEnqueue(Ptr<Packet> p, uint32_t qIndex);
 		Ptr<Packet> DoDequeueRR(bool paused[]);
+		Ptr<Packet> DoDequeueDcpWrr(bool paused[], uint32_t controlWeight, uint32_t dataWeight);
+		bool HasReadyDataQueue(bool paused[]);
+		uint32_t GetNextReadyDataQueue(bool paused[]);
+		Ptr<Packet> PopFromQueue(uint32_t qIndex);
 		//for compatibility
 		virtual bool DoEnqueue(Ptr<Packet> p);
 		virtual Ptr<Packet> DoDequeue(void);
@@ -61,6 +66,8 @@ namespace ns3 {
 		uint32_t m_bytesInQueueTotal;
 		uint32_t m_rrlast;
 		uint32_t m_qlast;
+		uint32_t m_dcpWrrControlSent;
+		uint32_t m_dcpWrrDataSent;
 		std::vector<Ptr<Queue> > m_queues; // uc queues
 	};
 

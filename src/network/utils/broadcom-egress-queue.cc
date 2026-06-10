@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 
+#include <algorithm>
 #include <iostream>
 #include <unordered_map>
 
@@ -61,6 +62,9 @@ BEgressQueue::BEgressQueue() : Queue() {
     NS_LOG_FUNCTION_NOARGS();
     m_bytesInQueueTotal = 0;
     m_rrlast = 0;
+    m_qlast = 0;
+    m_dcpWrrControlSent = 0;
+    m_dcpWrrDataSent = 0;
     for (uint32_t i = 0; i < fCnt; i++) {
         m_bytesInQueue[i] = 0;
         m_queues.push_back(CreateObject<DropTailQueue>());
@@ -126,36 +130,133 @@ BEgressQueue::DoDequeueRR(bool paused[])  // this is for switch only
         }
     }
     if (found) {
-        Ptr<Packet> p = m_queues[qIndex]->Dequeue();
-
-        // Check if the flow has been blocked by PFC
-        if (p) {
-            FlowIDNUMTag fit;
-            if (p->PeekPacketTag(fit)) {
-                unsigned flowid = static_cast<unsigned>(fit.GetId());
-                if (MAP_KEY_EXISTS(current_pause_time, flowid)) {
-                    Time tdiff = Simulator::Now() - current_pause_time[flowid];
-                    if (!MAP_KEY_EXISTS(acc_pause_time, flowid))
-                        acc_pause_time[flowid] = Seconds(0);
-                    acc_pause_time[flowid] = acc_pause_time[flowid] + tdiff;
-                    current_pause_time.erase(flowid);
-                }
-            }
-        }
-
-        m_traceBeqDequeue(p, qIndex);
-        m_bytesInQueueTotal -= p->GetSize();
-        m_bytesInQueue[qIndex] -= p->GetSize();
-        if (qIndex != 0) {
-            m_rrlast = qIndex;
-        }
-        m_qlast = qIndex;
-        NS_LOG_LOGIC("Popped " << p);
-        NS_LOG_LOGIC("Number bytes " << m_bytesInQueueTotal);
-        return p;
+        return PopFromQueue(qIndex);
     }
     NS_LOG_LOGIC("Nothing can be sent");
     return 0;
+}
+
+bool BEgressQueue::HasReadyDataQueue(bool paused[]) {
+    for (uint32_t i = 1; i < qCnt; i++) {
+        if (!paused[i] && m_queues[i]->GetNPackets() > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+uint32_t BEgressQueue::GetNextReadyDataQueue(bool paused[]) {
+    for (uint32_t i = 1; i <= qCnt; i++) {
+        uint32_t qIndex = (i + m_rrlast) % qCnt;
+        if (qIndex == 0) {
+            continue;
+        }
+        bool cond1 = !paused[qIndex];
+        bool cond2 = m_queues[qIndex]->GetNPackets() > 0;
+
+        if (!cond1 && cond2) {
+            FlowIDNUMTag fit;
+            Ptr<Packet> p = ConstCast<Packet, const Packet>(m_queues[qIndex]->Peek());
+            if (p->PeekPacketTag(fit)) {
+                unsigned flowid = static_cast<unsigned>(fit.GetId());
+                if (!MAP_KEY_EXISTS(current_pause_time, flowid)) {
+                    current_pause_time[flowid] = Simulator::Now();
+                }
+            }
+        } else if (cond1 && cond2) {
+            return qIndex;
+        }
+    }
+    return qCnt;
+}
+
+Ptr<Packet> BEgressQueue::PopFromQueue(uint32_t qIndex) {
+    Ptr<Packet> p = m_queues[qIndex]->Dequeue();
+
+    if (p) {
+        FlowIDNUMTag fit;
+        if (p->PeekPacketTag(fit)) {
+            unsigned flowid = static_cast<unsigned>(fit.GetId());
+            if (MAP_KEY_EXISTS(current_pause_time, flowid)) {
+                Time tdiff = Simulator::Now() - current_pause_time[flowid];
+                if (!MAP_KEY_EXISTS(acc_pause_time, flowid)) {
+                    acc_pause_time[flowid] = Seconds(0);
+                }
+                acc_pause_time[flowid] = acc_pause_time[flowid] + tdiff;
+                current_pause_time.erase(flowid);
+            }
+        }
+    }
+
+    m_traceBeqDequeue(p, qIndex);
+    m_bytesInQueueTotal -= p->GetSize();
+    m_bytesInQueue[qIndex] -= p->GetSize();
+    if (qIndex != 0) {
+        m_rrlast = qIndex;
+    }
+    m_qlast = qIndex;
+    NS_LOG_LOGIC("Popped " << p);
+    NS_LOG_LOGIC("Number bytes " << m_bytesInQueueTotal);
+    return p;
+}
+
+Ptr<Packet>
+BEgressQueue::DoDequeueDcpWrr(bool paused[], uint32_t controlWeight, uint32_t dataWeight)
+{
+    NS_LOG_FUNCTION(this);
+
+    if (m_bytesInQueueTotal == 0) {
+        NS_LOG_LOGIC("Queue empty");
+        return 0;
+    }
+
+    controlWeight = std::max<uint32_t>(1, controlWeight);
+    dataWeight = std::max<uint32_t>(1, dataWeight);
+    bool controlReady = m_queues[0]->GetNPackets() > 0;
+    bool dataReady = HasReadyDataQueue(paused);
+
+    if (!controlReady && !dataReady) {
+        NS_LOG_LOGIC("Nothing can be sent");
+        return 0;
+    }
+    if (controlReady && !dataReady) {
+        m_dcpWrrControlSent++;
+        return PopFromQueue(0);
+    }
+    if (!controlReady && dataReady) {
+        uint32_t qIndex = GetNextReadyDataQueue(paused);
+        if (qIndex < qCnt) {
+            m_dcpWrrDataSent++;
+            return PopFromQueue(qIndex);
+        }
+        return 0;
+    }
+
+    bool chooseControl = false;
+    if (m_dcpWrrControlSent >= controlWeight && m_dcpWrrDataSent >= dataWeight) {
+        m_dcpWrrControlSent = 0;
+        m_dcpWrrDataSent = 0;
+    }
+    if (m_dcpWrrControlSent < controlWeight) {
+        chooseControl = true;
+    } else if (m_dcpWrrDataSent >= dataWeight) {
+        m_dcpWrrControlSent = 0;
+        m_dcpWrrDataSent = 0;
+        chooseControl = true;
+    }
+
+    if (chooseControl) {
+        m_dcpWrrControlSent++;
+        return PopFromQueue(0);
+    }
+
+    uint32_t qIndex = GetNextReadyDataQueue(paused);
+    if (qIndex < qCnt) {
+        m_dcpWrrDataSent++;
+        return PopFromQueue(qIndex);
+    }
+    m_dcpWrrControlSent++;
+    return PopFromQueue(0);
 }
 
 bool BEgressQueue::Enqueue(Ptr<Packet> p, uint32_t qIndex) {
@@ -183,6 +284,21 @@ Ptr<Packet>
 BEgressQueue::DequeueRR(bool paused[]) {
     NS_LOG_FUNCTION(this);
     Ptr<Packet> packet = DoDequeueRR(paused);
+    if (packet != 0) {
+        NS_ASSERT(m_nBytes >= packet->GetSize());
+        NS_ASSERT(m_nPackets > 0);
+        m_nBytes -= packet->GetSize();
+        m_nPackets--;
+        NS_LOG_LOGIC("m_traceDequeue (packet)");
+        m_traceDequeue(packet);
+    }
+    return packet;
+}
+
+Ptr<Packet>
+BEgressQueue::DequeueDcpWrr(bool paused[], uint32_t controlWeight, uint32_t dataWeight) {
+    NS_LOG_FUNCTION(this);
+    Ptr<Packet> packet = DoDequeueDcpWrr(paused, controlWeight, dataWeight);
     if (packet != 0) {
         NS_ASSERT(m_nBytes >= packet->GetSize());
         NS_ASSERT(m_nPackets > 0);

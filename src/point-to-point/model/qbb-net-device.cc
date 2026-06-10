@@ -24,6 +24,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <unordered_map>
 
@@ -62,6 +64,43 @@ NS_LOG_COMPONENT_DEFINE("QbbNetDevice");
 namespace ns3 {
 
 extern std::unordered_map<unsigned, Time> acc_pause_time;
+
+static void RecordDcpSwitchQueueSample(Ptr<BEgressQueue> queue) {
+    if (!Settings::enable_dcp || queue == NULL) {
+        return;
+    }
+    uint64_t controlBytes = queue->GetNBytes(0);
+    uint64_t dataBytes = 0;
+    for (uint32_t i = 1; i < QbbNetDevice::qCnt; i++) {
+        dataBytes += queue->GetNBytes(i);
+    }
+
+    Settings::control_queue_len = std::max<uint64_t>(Settings::control_queue_len, controlBytes);
+    Settings::data_queue_len = std::max<uint64_t>(Settings::data_queue_len, dataBytes);
+    Settings::dcp_control_queue_max_len =
+        std::max<uint64_t>(Settings::dcp_control_queue_max_len, controlBytes);
+    Settings::dcp_data_queue_max_len =
+        std::max<uint64_t>(Settings::dcp_data_queue_max_len, dataBytes);
+    Settings::dcp_control_queue_sum_len += controlBytes;
+    Settings::dcp_data_queue_sum_len += dataBytes;
+    Settings::dcp_queue_samples++;
+}
+
+static uint32_t GetEffectiveDcpControlWeight() {
+    if (Settings::dcp_control_weight > 0 && Settings::dcp_data_weight > 0) {
+        return Settings::dcp_control_weight;
+    }
+    double ratio = std::max(0.0, Settings::dcp_ho_data_ratio_r);
+    uint32_t n = std::max<uint32_t>(1, Settings::dcp_inc_scale_n);
+    return std::max<uint32_t>(1, (uint32_t)std::ceil((double)n * ratio));
+}
+
+static uint32_t GetEffectiveDcpDataWeight() {
+    if (Settings::dcp_control_weight > 0 && Settings::dcp_data_weight > 0) {
+        return Settings::dcp_data_weight;
+    }
+    return 1;
+}
 
 // uint32_t RdmaEgressQueue::ack_q_idx = 3; // 3: Middle priority
 uint32_t RdmaEgressQueue::ack_q_idx = 0; // 0: high priority
@@ -303,8 +342,13 @@ void QbbNetDevice::DequeueAndTransmit(void) {
             }
         }
         return;
-    } else {                               // switch, doesn't care about qcn, just send
-        p = m_queue->DequeueRR(m_paused);  // this is round-robin
+    } else {  // switch, doesn't care about qcn, just send
+        if (Settings::enable_dcp && Settings::dcp_enable_wrr) {
+            p = m_queue->DequeueDcpWrr(m_paused, GetEffectiveDcpControlWeight(),
+                                       GetEffectiveDcpDataWeight());
+        } else {
+            p = m_queue->DequeueRR(m_paused);  // this is round-robin
+        }
         if (p != 0) {
             m_snifferTrace(p);
             m_promiscSnifferTrace(p);
@@ -315,6 +359,15 @@ void QbbNetDevice::DequeueAndTransmit(void) {
             packet->RemoveHeader(h);
             FlowIdTag t;
             uint32_t qIndex = m_queue->GetLastQueue();
+            if (Settings::enable_dcp && Settings::dcp_enable_wrr) {
+                if (qIndex == 0) {
+                    Settings::dcp_control_dequeue_packets++;
+                    Settings::dcp_control_dequeue_bytes += p->GetSize();
+                } else {
+                    Settings::dcp_data_dequeue_packets++;
+                    Settings::dcp_data_dequeue_bytes += p->GetSize();
+                }
+            }
             if (qIndex == 0) {  // this is a pause or cnp, send it immediately!
                 m_node->SwitchNotifyDequeue(m_ifIndex, qIndex, p);
                 p->RemovePacketTag(t);
@@ -323,6 +376,7 @@ void QbbNetDevice::DequeueAndTransmit(void) {
                 p->RemovePacketTag(t);
             }
             m_traceDequeue(p, qIndex);
+            RecordDcpSwitchQueueSample(m_queue);
             TransmitStart(p);
             return;
         } else {  // No queue can deliver any packet
@@ -415,9 +469,17 @@ bool QbbNetDevice::SwitchSend(uint32_t qIndex, Ptr<Packet> packet, CustomHeader 
     m_traceEnqueue(packet, qIndex);
     bool enqueued = m_queue->Enqueue(packet, qIndex);
     if (!enqueued) {
+        if (Settings::enable_dcp && Settings::dcp_enable_wrr) {
+            if (qIndex == 0) {
+                Settings::dcp_control_queue_drops++;
+            } else {
+                Settings::dcp_data_queue_drops++;
+            }
+        }
         m_traceDrop(packet, qIndex);
         return false;
     }
+    RecordDcpSwitchQueueSample(m_queue);
     DequeueAndTransmit();
     return true;
 }

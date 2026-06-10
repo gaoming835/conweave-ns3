@@ -178,7 +178,8 @@ def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
 
 
 def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retrans_per_round,
-                           enable_timeout_retx):
+                           enable_timeout_retx, enable_wrr, control_weight, data_weight,
+                           inc_scale_n, ho_data_ratio_r):
     if not enable_dcp:
         return ""
     return (
@@ -189,10 +190,20 @@ def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retra
         "DCP_HO_SIZE {ho_size}\n"
         "DCP_RETRANS_PER_ROUND {retrans_per_round}\n"
         "DCP_ENABLE_TIMEOUT_RETX {enable_timeout_retx}\n"
+        "DCP_ENABLE_WRR {enable_wrr}\n"
+        "DCP_CONTROL_WEIGHT {control_weight}\n"
+        "DCP_DATA_WEIGHT {data_weight}\n"
+        "DCP_INC_SCALE_N {inc_scale_n}\n"
+        "DCP_HO_DATA_RATIO_R {ho_data_ratio_r}\n"
     ).format(id=config_id, trim_threshold=trim_threshold,
              ho_size=ho_size,
              retrans_per_round=retrans_per_round,
-             enable_timeout_retx=enable_timeout_retx)
+             enable_timeout_retx=enable_timeout_retx,
+             enable_wrr=enable_wrr,
+             control_weight=control_weight,
+             data_weight=data_weight,
+             inc_scale_n=inc_scale_n,
+             ho_data_ratio_r=ho_data_ratio_r)
 
 
 def main():
@@ -255,6 +266,21 @@ def main():
     parser.add_argument('--dcp_enable_timeout_retx', dest='dcp_enable_timeout_retx', action='store',
                         type=int, default=0,
                         help="enable DCP fallback timeout retransmission (default: 0)")
+    parser.add_argument('--dcp_enable_wrr', dest='dcp_enable_wrr', action='store',
+                        type=int, default=0,
+                        help="enable DCP control/data WRR scheduler at switch egress (default: 0)")
+    parser.add_argument('--dcp_control_weight', dest='dcp_control_weight', action='store',
+                        type=int, default=1,
+                        help="DCP WRR control queue weight; set either weight to 0 to use N/R formula (default: 1)")
+    parser.add_argument('--dcp_data_weight', dest='dcp_data_weight', action='store',
+                        type=int, default=1,
+                        help="DCP WRR data queue weight; set either weight to 0 to use N/R formula (default: 1)")
+    parser.add_argument('--dcp_inc_scale_n', dest='dcp_inc_scale_n', action='store',
+                        type=int, default=1,
+                        help="DCP WRR formula incast scale N when explicit weights are disabled (default: 1)")
+    parser.add_argument('--dcp_ho_data_ratio_r', dest='dcp_ho_data_ratio_r', action='store',
+                        type=float, default=0.057,
+                        help="DCP WRR formula HO/data size ratio R when explicit weights are disabled (default: 0.057)")
     parser.add_argument('--ack_high_prio', dest='ack_high_prio', action='store',
                         type=int, default=1, help="set high priority for ACK/NACK packets (default: 1)")
     parser.add_argument('--bcc_u', dest='bcc_u', action='store',
@@ -529,7 +555,12 @@ def main():
                                             enable_dcp, config_ID, args.dcp_trim_threshold,
                                             args.dcp_ho_size,
                                             args.dcp_retrans_per_round,
-                                            args.dcp_enable_timeout_retx),
+                                            args.dcp_enable_timeout_retx,
+                                            args.dcp_enable_wrr,
+                                            args.dcp_control_weight,
+                                            args.dcp_data_weight,
+                                            args.dcp_inc_scale_n,
+                                            args.dcp_ho_data_ratio_r),
                                         ack_high_prio=ack_high_prio,
                                         bcc_u=args.bcc_u,
                                         bcc_s=args.bcc_s,

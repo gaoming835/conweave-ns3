@@ -115,3 +115,44 @@ Accepted result:
   accounting in trim smoke.
 - The trim smoke remains a wiring validation scenario; the large HO counter values are
   expected for this short congested topology and are not a paper-scale performance claim.
+
+## Phase 3: DCP Control Queue WRR Scheduler
+
+Date: 2026-06-10
+
+Implemented behavior:
+
+- Switch egress queues now support a DCP-only control/data WRR dequeue path.
+- `DCP_ENABLE_WRR` gates the new scheduler behind `ENABLE_DCP`; the default remains off
+  so existing RDMA/PFC/ACK behavior keeps the old queue scheduler unless explicitly enabled.
+- Queue `0` is treated as the DCP control class for HO and existing high-priority control
+  packets; queues `1..7` are treated as the data class.
+- New config keys are emitted by `run.py` and parsed by `network-load-balance.cc`:
+  `DCP_ENABLE_WRR`, `DCP_CONTROL_WEIGHT`, `DCP_DATA_WEIGHT`, `DCP_INC_SCALE_N`, and
+  `DCP_HO_DATA_RATIO_R`.
+- Direct weight configuration is supported. If either direct weight is `0`, the current
+  NS3 approximation computes `control_weight=max(1, ceil(N * R))` and
+  `data_weight=1` from `DCP_INC_SCALE_N` and `DCP_HO_DATA_RATIO_R`.
+- DCP stats now include WRR configuration, max/average sampled control/data queue
+  lengths, queue drop counters, and control/data dequeue packet/byte counters.
+
+Validation:
+
+| Script | Status | Run ID | Key stats |
+| --- | --- | --- | --- |
+| `scripts/run_dcp_wrr_smoke.sh` 5-host single-switch | pass | `684128414` | `dcp_ho_dropped=0`, `dcp_control_dequeue_packets=4`, `dcp_data_dequeue_packets=20`, `dcp_control_queue_max_len=60`, `dcp_data_queue_max_len=1048` |
+| `scripts/run_dcp_wrr_smoke.sh` 127-to-1 leaf-spine | pass | `531481623` | `dcp_ho_dropped=0`, `dcp_control_dequeue_packets=4459`, `dcp_data_dequeue_packets=2475`, `dcp_trim_events=957`, `dcp_completed_messages=127` |
+| `scripts/run_dcp_config_smoke.sh` | pass | `56984259` | default config still emits `DCP_ENABLE_WRR 0`; all Phase 3 stats fields are present |
+| `scripts/run_dcp_trim_smoke.sh` | pass | `866376792` | `dcp_trim_events=29880587`, `dcp_ho_generated=29880587`, `dcp_ho_dropped=0`, `dcp_non_dropped=0`, `dcp_ack_dropped=0` |
+
+Accepted result:
+
+- DCP control traffic no longer depends only on the old strict-high-priority queue
+  approximation when `DCP_ENABLE_WRR=1`.
+- Small single-switch and 127-to-1 leaf-spine incast smoke runs both show control and
+  data dequeue progress with zero HO drops.
+- Queue length averages are event-sampled on switch enqueue/dequeue, not time-weighted.
+  They are intended as smoke/diagnostic counters rather than paper-grade queue occupancy
+  metrics.
+- The 127-to-1 smoke uses small flows and moderate trim threshold to keep runtime short;
+  it validates WRR plumbing and HO/data progress, not paper-scale performance.
