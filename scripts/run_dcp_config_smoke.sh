@@ -99,6 +99,9 @@ expected_fields=(
   dcp_data_dequeue_packets
   dcp_control_dequeue_bytes
   dcp_data_dequeue_bytes
+  ar_packets
+  ar_path_switches
+  ar_used_next_hops
 )
 
 for field in "${expected_fields[@]}"; do
@@ -119,6 +122,9 @@ grep -q '^dcp_data_bytes_trimmed,0$' "${stats_file}"
 grep -q '^dcp_enable_wrr,0$' "${stats_file}"
 grep -q '^dcp_control_weight,1$' "${stats_file}"
 grep -q '^dcp_data_weight,1$' "${stats_file}"
+grep -q '^ar_packets,0$' "${stats_file}"
+grep -q '^ar_path_switches,0$' "${stats_file}"
+grep -q '^ar_used_next_hops,0$' "${stats_file}"
 
 echo "dcp_config_smoke=pass"
 echo "run_id=${run_id}"

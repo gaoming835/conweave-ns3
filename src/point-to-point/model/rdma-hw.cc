@@ -410,6 +410,7 @@ void RdmaHw::SendAck(Ptr<RdmaRxQueuePair> rxQp, Ptr<Packet> p, CustomHeader &ch,
 
     if (m_irn) {
         if (irnNack) {
+            Settings::irn_nack_packets++;
             uint32_t payloadSize = p->GetSize() - ch.GetSerializedSize();
             seqh.SetIrnNack(ch.udp.seq);
             seqh.SetIrnNackSize(payloadSize);
@@ -820,6 +821,7 @@ int RdmaHw::ReceiverCheckSeq(uint32_t seq, Ptr<RdmaRxQueuePair> q, uint32_t size
     } else if (seq > expected) {
         // Generate NACK
         if (m_irn) {
+            Settings::irn_ooo_packets++;
             if (q->m_milestone_rx < seq + size) q->m_milestone_rx = seq + size;
 
             // if seq is already nacked, check for nacktimer

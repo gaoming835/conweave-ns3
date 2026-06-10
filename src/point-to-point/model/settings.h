@@ -118,7 +118,7 @@ class Settings {
     static const uint32_t CONWEAVE_CTRL_DUMMY_INDEV = 88888888;  // just arbitrary
 
     /* load balancer */
-    // 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave, 10: Template
+    // 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave, 10: Template, 11: AR
     static uint32_t lb_mode;
 
     // for common setting
@@ -176,6 +176,11 @@ class Settings {
     static uint64_t dcp_data_dequeue_packets;
     static uint64_t dcp_control_dequeue_bytes;
     static uint64_t dcp_data_dequeue_bytes;
+    static uint64_t ar_packets;
+    static uint64_t ar_path_switches;
+    static uint64_t ar_used_next_hops;
+    static uint64_t irn_ooo_packets;
+    static uint64_t irn_nack_packets;
     static bool dcp_enable_wrr;
     static uint32_t dcp_control_weight;
     static uint32_t dcp_data_weight;

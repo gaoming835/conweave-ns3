@@ -35,6 +35,7 @@ VOQ_MON_DETAIL_FILE mix/output/{id}/{id}_out_voq_per_dst.txt
 UPLINK_MON_FILE mix/output/{id}/{id}_out_uplink.txt
 CONN_MON_FILE mix/output/{id}/{id}_out_conn.txt
 EST_ERROR_MON_FILE mix/output/{id}/{id}_out_est_error.txt
+AR_STATS_FILE mix/output/{id}/{id}_out_ar_stats.txt
 
 QLEN_MON_START {qlen_mon_start}
 QLEN_MON_END {qlen_mon_end}
@@ -117,6 +118,7 @@ lb_modes = {
     "conga": 3,
     "letflow": 6,
     "conweave": 9,
+    "ar": 11,
 }
 
 topo2bdp = {
@@ -126,6 +128,7 @@ topo2bdp = {
     "bcc_stage4_single_switch_5_10G_OS1": 5800,
     "bcc_stage4_single_switch_5_25G_OS1": 14500,
     "bcc_fat_320_25G_400G_OS1": 27125,  # 320 hosts, 25Gbps access, 400Gbps fabric
+    "dcp_ar_2path_100G_OS1": 104000,  # 2 hosts, 2 equal-hop paths with asymmetric delay
 }
 
 FLOWGEN_DEFAULT_TIME = 2.0  # see /traffic_gen/traffic_gen.py::base_t
@@ -217,7 +220,7 @@ def main():
     parser.add_argument('--cc', dest='cc', action='store',
                         default='dcqcn', help="hpcc/dcqcn/timely/dctcp (default: dcqcn)")
     parser.add_argument('--lb', dest='lb', action='store',
-                        default='fecmp', help="fecmp/pecmp/drill/conga (default: fecmp)")
+                        default='fecmp', help="fecmp/drill/conga/letflow/conweave/ar (default: fecmp)")
     parser.add_argument('--pfc', dest='pfc', action='store',
                         type=int, default=1, help="enable PFC (default: 1)")
     parser.add_argument('--irn', dest='irn', action='store',

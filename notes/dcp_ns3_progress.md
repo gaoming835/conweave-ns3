@@ -156,3 +156,40 @@ Accepted result:
   metrics.
 - The 127-to-1 smoke uses small flows and moderate trim threshold to keep runtime short;
   it validates WRR plumbing and HO/data progress, not paper-scale performance.
+
+## Phase 4: Packet-Level Adaptive Routing AR
+
+Date: 2026-06-10
+
+Implemented behavior:
+
+- `run.py --lb ar` now maps to `LB_MODE 11`.
+- `SwitchNode::GetOutDev(...)` dispatches UDP data packets to packet-level AR when
+  `LB_MODE 11` is active.
+- AR chooses the available next-hop with the smallest local egress queue bytes.
+- Ties are broken per packet using the 5-tuple plus UDP sequence number, so equal-load
+  paths can split packets from the same flow.
+- Control packets, ACK/NACK, PFC/QCN, and DCP HO packets fall back to flow ECMP.
+- New AR/IRN stats are exported to `AR_STATS_FILE` for both RDMA/IRN and DCP runs:
+  `ar_packets`, `ar_path_switches`, `ar_used_next_hops`, `irn_ooo_packets`, and
+  `irn_nack_packets`.
+- DCP stats also include `ar_packets`, `ar_path_switches`, and `ar_used_next_hops`.
+- Added `config/dcp_ar_2path_100G_OS1.txt`, a small two-host/two-path fixture with
+  equal hop count but asymmetric path delay, for deterministic AR OOO validation.
+
+Validation:
+
+| Script | Status | Run ID | Key stats |
+| --- | --- | --- | --- |
+| `scripts/run_dcp_ar_smoke.sh` IRN+AR | pass | `364533103` | `ar_packets=384`, `ar_path_switches>0`, `ar_used_next_hops>=2`, `irn_ooo_packets=90`, `irn_nack_packets=162` |
+| `scripts/run_dcp_ar_smoke.sh` DCP+AR | pass | `630594678` | `ar_packets=384`, `ar_path_switches=63`, `ar_used_next_hops=10`, `dcp_ooo_packets>0`, `dcp_spurious_retx=0` |
+
+Accepted result:
+
+- `run.py --lb ar` is runnable.
+- The dedicated small topology shows packet-level path diversity for packets from the
+  same flow.
+- In the same topology and traffic pattern, IRN+AR observes OOO/NACK behavior while
+  DCP+AR tolerates OOO packets without spurious DCP retransmission.
+- The AR policy is still a local queue-byte heuristic, not a full paper-scale AR
+  evaluation; Phase 7 should use larger workloads for paper figure reproduction.

@@ -3,6 +3,7 @@
 
 #include <ns3/node.h>
 
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -81,6 +82,12 @@ class SwitchNode : public Node {
     // Template load balancer (lb_mode = 10)
     uint32_t DoLbTemplate(Ptr<const Packet> p, const CustomHeader &ch,
                           const std::vector<int> &nexthops);
+    // Packet-level Adaptive Routing (lb_mode = 11)
+    uint32_t DoLbAdaptiveRouting(Ptr<const Packet> p, const CustomHeader &ch,
+                                 const std::vector<int> &nexthops);
+    uint64_t GetArFlowKey(const CustomHeader &ch) const;
+    std::unordered_map<uint64_t, uint32_t> m_arLastOutDev;
+    std::unordered_set<uint64_t> m_arUsedNextHopSet;
 
    public:
     enum DcpAdmissionAction {

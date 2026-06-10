@@ -188,6 +188,56 @@ uint32_t SwitchNode::DoLbTemplate(Ptr<const Packet> p, const CustomHeader &ch,
                                   const std::vector<int> &nexthops) {
     return DoLbFlowECMP(p, ch, nexthops);  // placeholder until a policy is implemented
 }
+
+uint64_t SwitchNode::GetArFlowKey(const CustomHeader &ch) const {
+    uint64_t key = ((uint64_t)ch.udp.sport << 48) ^ ((uint64_t)ch.udp.dport << 32) ^
+                   ((uint64_t)(ch.sip & 0xffff) << 16) ^ (uint64_t)(ch.dip & 0xffff);
+    return key;
+}
+
+uint32_t SwitchNode::DoLbAdaptiveRouting(Ptr<const Packet> p, const CustomHeader &ch,
+                                         const std::vector<int> &nexthops) {
+    uint32_t bestLoad = std::numeric_limits<uint32_t>::max();
+    std::vector<int> bestPorts;
+    for (std::vector<int>::const_iterator it = nexthops.begin(); it != nexthops.end(); ++it) {
+        uint32_t load = CalculateInterfaceLoad(*it);
+        if (load < bestLoad) {
+            bestLoad = load;
+            bestPorts.clear();
+            bestPorts.push_back(*it);
+        } else if (load == bestLoad) {
+            bestPorts.push_back(*it);
+        }
+    }
+
+    uint32_t outDev = bestPorts[0];
+    if (bestPorts.size() > 1) {
+        union {
+            uint8_t u8[4 + 4 + 2 + 2 + 4];
+            uint32_t u32[4];
+        } buf;
+        buf.u32[0] = ch.sip;
+        buf.u32[1] = ch.dip;
+        buf.u32[2] = ch.udp.sport | ((uint32_t)ch.udp.dport << 16);
+        buf.u32[3] = ch.udp.seq;
+        outDev = bestPorts[EcmpHash(buf.u8, 16, m_ecmpSeed) % bestPorts.size()];
+    }
+
+    Settings::ar_packets++;
+    uint64_t flowKey = GetArFlowKey(ch);
+    std::unordered_map<uint64_t, uint32_t>::iterator last = m_arLastOutDev.find(flowKey);
+    if (last != m_arLastOutDev.end() && last->second != outDev) {
+        Settings::ar_path_switches++;
+    }
+    m_arLastOutDev[flowKey] = outDev;
+
+    uint64_t hopKey = ((uint64_t)m_id << 56) ^ (flowKey << 8) ^ (uint64_t)outDev;
+    if (m_arUsedNextHopSet.insert(hopKey).second) {
+        Settings::ar_used_next_hops++;
+    }
+
+    return outDev;
+}
 /*----------------------------------*/
 
 void SwitchNode::CheckAndSendPfc(uint32_t inDev, uint32_t qIndex) {
@@ -440,6 +490,15 @@ int SwitchNode::GetOutDev(Ptr<Packet> p, CustomHeader &ch) {
 
     if (Settings::lb_mode == 0 || control_pkt) {  // control packet (ACK, NACK, PFC, QCN)
         return DoLbFlowECMP(p, ch, nexthops);     // ECMP routing path decision (4-tuple)
+    }
+
+    if (Settings::lb_mode == 11) {
+        DcpTag dcpTag;
+        uint8_t dcpType = ClassifyDcpPacket(p, ch, &dcpTag);
+        if (ch.l3Prot != 0x11 || dcpType == DcpTag::DCP_HO) {
+            return DoLbFlowECMP(p, ch, nexthops);
+        }
+        return DoLbAdaptiveRouting(p, ch, nexthops);
     }
 
     switch (Settings::lb_mode) {

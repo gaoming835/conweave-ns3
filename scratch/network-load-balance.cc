@@ -54,7 +54,7 @@ using namespace std;
 NS_LOG_COMPONENT_DEFINE("GENERIC_SIMULATION");
 
 /*------Load balancing parameters-----*/
-// mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave, 10: Template
+// mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave, 10: Template, 11: AR
 uint32_t lb_mode = 0;
 
 // Conga params (based on paper recommendation)
@@ -124,6 +124,7 @@ std::string voq_mon_detail_file = "voq_detail.txt";
 std::string uplink_mon_file = "uplink.txt";
 std::string conn_mon_file = "conn.txt";
 std::string est_error_output_file = "est_error.txt";
+std::string ar_stats_file = "ar_stats.txt";
 
 // CC params
 double alpha_resume_interval = 55, rp_timer = 300, ewma_gain = 1 / 16;
@@ -683,6 +684,24 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_data_dequeue_packets,%lu\n", Settings::dcp_data_dequeue_packets);
     fprintf(fout, "dcp_control_dequeue_bytes,%lu\n", Settings::dcp_control_dequeue_bytes);
     fprintf(fout, "dcp_data_dequeue_bytes,%lu\n", Settings::dcp_data_dequeue_bytes);
+    fprintf(fout, "ar_packets,%lu\n", Settings::ar_packets);
+    fprintf(fout, "ar_path_switches,%lu\n", Settings::ar_path_switches);
+    fprintf(fout, "ar_used_next_hops,%lu\n", Settings::ar_used_next_hops);
+    fclose(fout);
+}
+
+void ar_stats_print() {
+    FILE *fout = fopen(ar_stats_file.c_str(), "w");
+    if (fout == NULL) {
+        std::cerr << "ERROR - failed to open AR_STATS_FILE: " << ar_stats_file << std::endl;
+        return;
+    }
+    fprintf(fout, "field,value\n");
+    fprintf(fout, "ar_packets,%lu\n", Settings::ar_packets);
+    fprintf(fout, "ar_path_switches,%lu\n", Settings::ar_path_switches);
+    fprintf(fout, "ar_used_next_hops,%lu\n", Settings::ar_used_next_hops);
+    fprintf(fout, "irn_ooo_packets,%lu\n", Settings::irn_ooo_packets);
+    fprintf(fout, "irn_nack_packets,%lu\n", Settings::irn_nack_packets);
     fclose(fout);
 }
 
@@ -981,6 +1000,11 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 est_error_output_file = v;
                 std::cerr << "EST_ERROR_MON_FILE\t\t\t" << est_error_output_file << "\n";
+            } else if (key.compare("AR_STATS_FILE") == 0) {
+                std::string v;
+                conf >> v;
+                ar_stats_file = v;
+                std::cerr << "AR_STATS_FILE\t\t\t" << ar_stats_file << "\n";
             } else if (key.compare("LB_MODE") == 0) {
                 uint32_t v;
                 conf >> v;
@@ -1541,8 +1565,10 @@ int main(int argc, char *argv[]) {
         double error_rate;
         topof >> src >> dst >> data_rate >> link_delay >> error_rate;
 
-        /** ASSUME: fixed one-hop delay across network */
-        assert(std::to_string(one_hop_delay) + "ns" == link_delay);
+        /** ASSUME: fixed one-hop delay across network, except dedicated AR OOO fixture. */
+        if (topology_file.find("dcp_ar_2path_100G_OS1") == std::string::npos) {
+            assert(std::to_string(one_hop_delay) + "ns" == link_delay);
+        }
 
         link_pairs.push_back(std::make_pair(src, dst));
         Ptr<Node> snode = n.Get(src), dnode = n.Get(dst);
@@ -1702,6 +1728,7 @@ int main(int argc, char *argv[]) {
     topo2bdpMap[std::string("bcc_stage4_single_switch_5_10G_OS1")] = 5800;
     topo2bdpMap[std::string("bcc_stage4_single_switch_5_25G_OS1")] = 14500;
     topo2bdpMap[std::string("bcc_fat_320_25G_400G_OS1")] = 27125;
+    topo2bdpMap[std::string("dcp_ar_2path_100G_OS1")] = 104000;
 
     // topology_file
     bool found_topo2bdpMap = false;
@@ -2145,6 +2172,9 @@ int main(int argc, char *argv[]) {
     Simulator::Run();
     if (Settings::enable_dcp) {
         dcp_stats_print();
+    }
+    if (Settings::lb_mode == 11) {
+        ar_stats_print();
     }
 
     /*-----------------------------------------------------------------------------*/
