@@ -11,6 +11,7 @@
 
 #include "bcc-tag.h"
 #include "cn-header.h"
+#include "dcp-tag.h"
 #include "flow-stat-tag.h"
 #include "ns3/boolean.h"
 #include "ns3/data-rate.h"
@@ -400,6 +401,16 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
             if (hasBccTag) {
                 newp->AddPacketTag(bccFeedback);
             }
+        }
+
+        if (Settings::enable_dcp) {
+            DcpTag dcpAckTag;
+            dcpAckTag.SetPacketType(DcpTag::DCP_ACK);
+            dcpAckTag.SetOriginalData(rxQp->m_flow_id, seqh.GetSeq(), Ipv4Address(ch.dip),
+                                      Ipv4Address(ch.sip), ch.udp.dport, ch.udp.sport,
+                                      ch.udp.pg);
+            newp->AddPacketTag(dcpAckTag);
+            Settings::dcp_ack_packets++;
         }
 
         newp->AddHeader(head);
@@ -853,6 +864,15 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
             fst.setInitiatedTime(Simulator::Now().GetSeconds());
             p->AddPacketTag(fst);
         }
+    }
+
+    if (Settings::enable_dcp) {
+        DcpTag dcpDataTag;
+        dcpDataTag.SetPacketType(DcpTag::DCP_DATA);
+        dcpDataTag.SetOriginalData(qp->m_flow_id, seq, qp->sip, qp->dip, qp->sport, qp->dport,
+                                  qp->m_pg);
+        p->AddPacketTag(dcpDataTag);
+        Settings::dcp_data_packets++;
     }
 
     if (qp->irn.m_enabled) {
