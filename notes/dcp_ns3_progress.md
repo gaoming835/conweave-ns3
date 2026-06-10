@@ -39,3 +39,41 @@ Notes:
 
 - Smoke scripts that locate output directories by diffing `mix/output` should be run serially; parallel runs can make a script select the wrong new run directory.
 - The trim, HO-return, and retrans smokes intentionally create very large packet/counter values in the short congestion scenario. Phase 0 treats these as wiring validation, not performance or paper-scale claims.
+
+## Phase 1: Paper-Compatible DCP Packet Type Encoding
+
+Date: 2026-06-10
+
+Implemented behavior:
+
+- DCP type is encoded in IPv4 ToS bits `[3:2]`, inside the DSCP field.
+- IPv4 ToS bits `[1:0]` remain ECN bits and are preserved by DCP helper APIs.
+- `DcpTag` remains the simulation metadata carrier for flow id, PSN, ports, PG, and
+  original data tuple.
+- RDMA DATA, ACK, switch-generated HO, and returned HO packets now write the DCP type
+  into the IPv4 header.
+- Switch-side DCP DATA detection prefers IPv4 ToS/DSCP type and falls back to
+  `DcpTag` only for old packets whose IP DCP type is `DCP_NON`.
+
+Helper APIs added in `src/point-to-point/model/dcp-tag.{h,cc}`:
+
+- `PreserveEcnAndSetDcpType(...)`
+- `SetDcpTypeInIpHeader(...)`
+- `GetDcpTypeFromIpHeader(...)`
+- `GetDcpTypeFromTos(...)`
+
+Validation:
+
+| Script | Status | Run ID | Key stats |
+| --- | --- | --- | --- |
+| `scripts/run_dcp_packet_type_smoke.sh` | pass | `277749882` | `dcp_packet_type_unit=pass`, `dcp_data_packets=5`, `dcp_ack_packets=1`, `dcp_ho_packets=0`, `dcp_completed_messages=1` |
+| `scripts/run_dcp_ho_return_smoke.sh` | pass | `655606511` | `dcp_ho_rx_at_receiver=29880584`, `dcp_ho_returned=29880584`, `dcp_ho_rx_at_sender=29880578` |
+| `scripts/run_dcp_trim_smoke.sh` | pass | `81645104` | `dcp_trim_events=29880587`, `dcp_ho_generated=29880587`, `dcp_ho_dropped=0` |
+
+Accepted result:
+
+- `dcp-packet-type-test` now verifies DCP ACK/DATA/HO can be encoded in and decoded
+  from `Ipv4Header` ToS.
+- The unit test verifies ECN bits survive DCP type writes.
+- The existing packet-type, trim, and HO-return smoke paths still pass after switching
+  runtime packet classification to prefer IP ToS/DSCP.

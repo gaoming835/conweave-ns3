@@ -29,6 +29,20 @@ namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE("RdmaHw");
 
+namespace {
+bool ResolveDcpTypeFromHeaderOrTag(uint8_t tos, Ptr<Packet> p, uint8_t type, DcpTag *tag) {
+    DcpTag dcpTag;
+    bool hasTag = p->PeekPacketTag(dcpTag);
+    uint8_t ipType = DcpTag::GetDcpTypeFromTos(tos);
+    bool matches = ipType == type || (ipType == DcpTag::DCP_NON && hasTag &&
+                                      dcpTag.GetPacketType() == type);
+    if (matches && hasTag && tag != NULL) {
+        *tag = dcpTag;
+    }
+    return matches && hasTag;
+}
+}  // namespace
+
 std::unordered_map<unsigned, unsigned> acc_timeout_count;
 uint64_t RdmaHw::nAllPkts = 0;
 
@@ -314,7 +328,7 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
 
     if (Settings::enable_dcp) {
         DcpTag dcpTag;
-        if (p->PeekPacketTag(dcpTag) && dcpTag.GetPacketType() == DcpTag::DCP_HO) {
+        if (ResolveDcpTypeFromHeaderOrTag(ch.m_tos, p, DcpTag::DCP_HO, &dcpTag)) {
             Settings::dcp_ho_rx_at_receiver++;
             ReturnDcpHo(p, ch, dcpTag);
             return 1;
@@ -443,6 +457,7 @@ void RdmaHw::SendAck(Ptr<RdmaRxQueuePair> rxQp, Ptr<Packet> p, CustomHeader &ch,
     }
 
     if (Settings::enable_dcp) {
+        DcpTag::SetDcpTypeInIpHeader(head, DcpTag::DCP_ACK);
         DcpTag dcpAckTag;
         dcpAckTag.SetPacketType(DcpTag::DCP_ACK);
         dcpAckTag.SetOriginalData(rxQp->m_flow_id, seqh.GetSeq(), Ipv4Address(ch.dip),
@@ -479,6 +494,7 @@ void RdmaHw::ReturnDcpHo(Ptr<Packet> p, CustomHeader &ch, const DcpTag &hoTag) {
     head.SetProtocol(0xFD);
     head.SetTtl(64);
     head.SetPayloadSize(newp->GetSize());
+    DcpTag::SetDcpTypeInIpHeader(head, DcpTag::DCP_HO);
 
     Ptr<RdmaRxQueuePair> rxQp =
         GetRxQp(ch.dip, ch.sip, ch.udp.dport, ch.udp.sport, ch.udp.pg, false);
@@ -584,7 +600,7 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
     bool dcpHoReturn = false;
     DcpTag dcpTag;
     if (Settings::enable_dcp) {
-        dcpHoReturn = p->PeekPacketTag(dcpTag) && dcpTag.GetPacketType() == DcpTag::DCP_HO;
+        dcpHoReturn = ResolveDcpTypeFromHeaderOrTag(ch.m_tos, p, DcpTag::DCP_HO, &dcpTag);
     }
     uint64_t key = GetQpKey(ch.sip, port, sport, qIndex);
     Ptr<RdmaQueuePair> qp = GetQp(key);
@@ -966,6 +982,9 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
     ipHeader.SetPayloadSize(p->GetSize());
     ipHeader.SetTtl(64);
     ipHeader.SetTos(0);
+    if (Settings::enable_dcp) {
+        DcpTag::SetDcpTypeInIpHeader(ipHeader, DcpTag::DCP_DATA);
+    }
     ipHeader.SetIdentification(qp->m_ipid);
     p->AddHeader(ipHeader);
     // add ppp header

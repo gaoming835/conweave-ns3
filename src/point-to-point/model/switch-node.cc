@@ -21,6 +21,18 @@
 
 namespace ns3 {
 
+namespace {
+void SetPacketDcpTypeInIpHeader(Ptr<Packet> p, uint8_t type) {
+    PppHeader ppp;
+    Ipv4Header h;
+    p->RemoveHeader(ppp);
+    p->RemoveHeader(h);
+    DcpTag::SetDcpTypeInIpHeader(h, type);
+    p->AddHeader(h);
+    p->AddHeader(ppp);
+}
+}  // namespace
+
 TypeId SwitchNode::GetTypeId(void) {
     static TypeId tid =
         TypeId("ns3::SwitchNode")
@@ -267,15 +279,17 @@ void SwitchNode::SendToDevContinue(Ptr<Packet> p, CustomHeader &ch) {
     return;  // Drop otherwise
 }
 
-bool SwitchNode::IsDcpDataPacket(Ptr<Packet> p, DcpTag *tag) const {
+bool SwitchNode::IsDcpDataPacket(Ptr<Packet> p, const CustomHeader &ch, DcpTag *tag) const {
     if (!Settings::enable_dcp) {
         return false;
     }
     DcpTag dcpTag;
-    if (!p->PeekPacketTag(dcpTag)) {
-        return false;
-    }
-    if (dcpTag.GetPacketType() != DcpTag::DCP_DATA) {
+    bool hasTag = p->PeekPacketTag(dcpTag);
+    uint8_t ipType = DcpTag::GetDcpTypeFromTos(ch.m_tos);
+    bool isData = ipType == DcpTag::DCP_DATA ||
+                  (ipType == DcpTag::DCP_NON && hasTag &&
+                   dcpTag.GetPacketType() == DcpTag::DCP_DATA);
+    if (!isData || !hasTag) {
         return false;
     }
     if (tag != NULL) {
@@ -306,6 +320,7 @@ Ptr<Packet> SwitchNode::CreateDcpHoPacket(Ptr<Packet> p, const DcpTag &dataTag) 
 
     DcpTag hoTag = dataTag;
     hoTag.SetPacketType(DcpTag::DCP_HO);
+    SetPacketDcpTypeInIpHeader(ho, DcpTag::DCP_HO);
     ho->AddPacketTag(hoTag);
     return ho;
 }
@@ -371,7 +386,7 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
     p->PeekPacketTag(t);
     uint32_t inDev = t.GetFlowId();
     DcpTag dcpDataTag;
-    bool dcpDataPacket = IsDcpDataPacket(p, &dcpDataTag);
+    bool dcpDataPacket = IsDcpDataPacket(p, ch, &dcpDataTag);
 
     /** NOTE:
      * ConWeave control packets have the high priority as ACK/NACK/PFC/etc with qIndex = 0.

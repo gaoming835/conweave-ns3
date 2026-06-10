@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include "ns3/dcp-tag.h"
+#include "ns3/ipv4-header.h"
 #include "ns3/packet.h"
 
 using namespace ns3;
@@ -26,12 +27,31 @@ static bool CheckTag(const DcpTag &tag, uint8_t type) {
     return ok;
 }
 
+static bool CheckIpType(uint8_t type, uint8_t ecnBits) {
+    Ipv4Header header;
+    header.SetTos(0xa0 | ecnBits);
+    DcpTag::SetDcpTypeInIpHeader(header, type);
+    uint8_t expectedTos = (0xa0 & 0xf3) | ((type & 0x03) << 2) | (ecnBits & 0x03);
+    bool ok = true;
+    ok = Check(header.GetTos() == expectedTos, "DCP ToS layout mismatch") && ok;
+    ok = Check((header.GetTos() & 0x03) == (ecnBits & 0x03), "ECN bits not preserved") && ok;
+    ok = Check(DcpTag::GetDcpTypeFromIpHeader(header) == type, "DCP IP header type mismatch") &&
+         ok;
+    ok = Check(DcpTag::GetDcpTypeFromTos(header.GetTos()) == type, "DCP ToS type mismatch") &&
+         ok;
+    return ok;
+}
+
 int main() {
     bool ok = true;
     ok = Check(DcpTag::DCP_NON == 0, "DCP_NON value") && ok;
     ok = Check(DcpTag::DCP_ACK == 1, "DCP_ACK value") && ok;
     ok = Check(DcpTag::DCP_DATA == 2, "DCP_DATA value") && ok;
     ok = Check(DcpTag::DCP_HO == 3, "DCP_HO value") && ok;
+    ok = Check(DcpTag::GetDcpTypeFromTos(0) == DcpTag::DCP_NON, "DCP_NON ToS decode") && ok;
+    ok = CheckIpType(DcpTag::DCP_ACK, 0x01) && ok;
+    ok = CheckIpType(DcpTag::DCP_DATA, 0x02) && ok;
+    ok = CheckIpType(DcpTag::DCP_HO, 0x03) && ok;
 
     DcpTag dataTag;
     dataTag.SetPacketType(DcpTag::DCP_DATA);

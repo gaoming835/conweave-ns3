@@ -53,7 +53,7 @@ class SwitchNode : public Node {
 
     /* Sending packet to Egress port */
     void DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, uint32_t qIndex);
-    bool IsDcpDataPacket(Ptr<Packet> p, DcpTag *tag) const;
+    bool IsDcpDataPacket(Ptr<Packet> p, const CustomHeader &ch, DcpTag *tag) const;
     Ptr<Packet> CreateDcpHoPacket(Ptr<Packet> p, const DcpTag &dataTag) const;
     void UpdateDcpQueueStats(uint32_t outDev, uint32_t qIndex);
     void UpdateBccStateAndTag(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p);

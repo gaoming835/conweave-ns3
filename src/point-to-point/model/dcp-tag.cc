@@ -2,6 +2,12 @@
 
 namespace ns3 {
 
+namespace {
+const uint8_t kDcpTypeShift = 2;
+const uint8_t kDcpTypeMask = 0x0c;
+const uint8_t kDcpTypeValueMask = 0x03;
+}  // namespace
+
 DcpTag::DcpTag()
     : m_packetType(DCP_NON),
       m_flowId(-1),
@@ -85,6 +91,22 @@ void DcpTag::SetOriginalData(int32_t flowId, uint32_t psn, Ipv4Address src, Ipv4
     m_srcPort = srcPort;
     m_dstPort = dstPort;
     m_pg = pg;
+}
+
+uint8_t DcpTag::PreserveEcnAndSetDcpType(uint8_t tos, uint8_t type) {
+    return (tos & ~kDcpTypeMask) | ((type & kDcpTypeValueMask) << kDcpTypeShift);
+}
+
+void DcpTag::SetDcpTypeInIpHeader(Ipv4Header &header, uint8_t type) {
+    header.SetTos(PreserveEcnAndSetDcpType(header.GetTos(), type));
+}
+
+uint8_t DcpTag::GetDcpTypeFromIpHeader(const Ipv4Header &header) {
+    return GetDcpTypeFromTos(header.GetTos());
+}
+
+uint8_t DcpTag::GetDcpTypeFromTos(uint8_t tos) {
+    return (tos & kDcpTypeMask) >> kDcpTypeShift;
 }
 
 const char *DcpTag::PacketTypeToString(uint8_t type) {

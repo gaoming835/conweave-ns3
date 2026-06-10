@@ -2,6 +2,7 @@
 #define DCP_TAG_H
 
 #include "ns3/ipv4-address.h"
+#include "ns3/ipv4-header.h"
 #include "ns3/tag.h"
 #include "ns3/type-id.h"
 
@@ -52,6 +53,10 @@ class DcpTag : public Tag {
     void SetOriginalData(int32_t flowId, uint32_t psn, Ipv4Address src, Ipv4Address dst,
                          uint16_t srcPort, uint16_t dstPort, uint16_t pg);
 
+    static uint8_t PreserveEcnAndSetDcpType(uint8_t tos, uint8_t type);
+    static void SetDcpTypeInIpHeader(Ipv4Header &header, uint8_t type);
+    static uint8_t GetDcpTypeFromIpHeader(const Ipv4Header &header);
+    static uint8_t GetDcpTypeFromTos(uint8_t tos);
     static const char *PacketTypeToString(uint8_t type);
 
    private:
