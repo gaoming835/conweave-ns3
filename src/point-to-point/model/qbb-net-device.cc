@@ -95,6 +95,7 @@ Ptr<Packet> RdmaEgressQueue::DequeueQindex(int qIndex) {
     }
     if (qIndex >= 0) {  // qp
         Ptr<Packet> p = m_rdmaGetNxtPkt(m_qpGrp->Get(qIndex));
+        if (p == 0) return 0;
         m_rrlast = qIndex;
         m_qlast = qIndex;
         m_traceRdmaDequeue(p, m_qpGrp->Get(qIndex)->m_pg);
@@ -113,9 +114,11 @@ int RdmaEgressQueue::GetNextQindex(bool paused[]) {
         if (m_qpGrp->IsQpFinished((qIndex + m_rrlast) % fcount)) continue;
         Ptr<RdmaQueuePair> qp = m_qpGrp->Get((qIndex + m_rrlast) % fcount);
         bool cond1 = !paused[qp->m_pg];
+        bool cond_dcp_retrans = Settings::enable_dcp && qp->HasDcpRetrans();
         bool cond_window_allowed =
+            cond_dcp_retrans ||
             (!qp->IsWinBound() && (!qp->irn.m_enabled || qp->CanIrnTransmit(m_mtu)));
-        bool cond2 = (qp->GetBytesLeft() > 0 && cond_window_allowed);
+        bool cond2 = cond_dcp_retrans || (qp->GetBytesLeft() > 0 && cond_window_allowed);
 
         if (!cond2 && !m_qpGrp->IsQpFinished((qIndex + m_rrlast) % fcount)) {
             if (qp->IsFinishedConst()) {
@@ -269,6 +272,10 @@ void QbbNetDevice::DequeueAndTransmit(void) {
             // a qp dequeue a packet
             Ptr<RdmaQueuePair> lastQp = m_rdmaEQ->GetQp(qIndex);
             p = m_rdmaEQ->DequeueQindex(qIndex);
+            if (p == 0) {
+                DequeueAndTransmit();
+                return;
+            }
 
             // transmit
             m_traceQpDequeue(p, lastQp);
@@ -282,7 +289,10 @@ void QbbNetDevice::DequeueAndTransmit(void) {
             bool valid = false;
             for (uint32_t i = 0; i < m_rdmaEQ->GetFlowCount(); i++) {
                 Ptr<RdmaQueuePair> qp = m_rdmaEQ->GetQp(i);
-                if (qp->GetBytesLeft() == 0 || qp->m_nextAvail <= Simulator::Now()) continue;
+                if ((qp->GetBytesLeft() == 0 &&
+                     !(Settings::enable_dcp && qp->HasDcpRetrans())) ||
+                    qp->m_nextAvail <= Simulator::Now())
+                    continue;
                 t = Min(qp->m_nextAvail, t);
                 valid = true;
             }

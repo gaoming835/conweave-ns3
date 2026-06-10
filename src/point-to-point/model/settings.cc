@@ -36,6 +36,8 @@ uint64_t Settings::dcp_ho_generated = 0;
 uint64_t Settings::dcp_ho_returned = 0;
 uint64_t Settings::dcp_ho_rx_at_receiver = 0;
 uint64_t Settings::dcp_ho_rx_at_sender = 0;
+uint64_t Settings::dcp_retransq_enqueue = 0;
+uint64_t Settings::dcp_retransq_dequeue = 0;
 uint64_t Settings::dcp_precise_retx = 0;
 uint64_t Settings::dcp_spurious_retx = 0;
 uint64_t Settings::dcp_timeout_retx = 0;
@@ -46,6 +48,8 @@ uint64_t Settings::dcp_data_dropped = 0;
 uint64_t Settings::control_queue_len = 0;
 uint64_t Settings::data_queue_len = 0;
 uint32_t Settings::dcp_trim_threshold = 0xffffffff;
+uint32_t Settings::dcp_retrans_per_round = 1;
+bool Settings::dcp_enable_timeout_retx = false;
 
 /* for load balancer */
 std::map<uint32_t, uint32_t> Settings::hostIp2SwitchId;

@@ -646,6 +646,8 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_ho_returned,%lu\n", Settings::dcp_ho_returned);
     fprintf(fout, "dcp_ho_rx_at_receiver,%lu\n", Settings::dcp_ho_rx_at_receiver);
     fprintf(fout, "dcp_ho_rx_at_sender,%lu\n", Settings::dcp_ho_rx_at_sender);
+    fprintf(fout, "dcp_retransq_enqueue,%lu\n", Settings::dcp_retransq_enqueue);
+    fprintf(fout, "dcp_retransq_dequeue,%lu\n", Settings::dcp_retransq_dequeue);
     fprintf(fout, "dcp_precise_retx,%lu\n", Settings::dcp_precise_retx);
     fprintf(fout, "dcp_spurious_retx,%lu\n", Settings::dcp_spurious_retx);
     fprintf(fout, "dcp_timeout_retx,%lu\n", Settings::dcp_timeout_retx);
@@ -1254,6 +1256,16 @@ int main(int argc, char *argv[]) {
             } else if (key.compare("DCP_TRIM_THRESHOLD") == 0) {
                 conf >> Settings::dcp_trim_threshold;
                 std::cerr << "DCP_TRIM_THRESHOLD\t\t" << Settings::dcp_trim_threshold << "\n";
+            } else if (key.compare("DCP_RETRANS_PER_ROUND") == 0) {
+                conf >> Settings::dcp_retrans_per_round;
+                if (Settings::dcp_retrans_per_round == 0) {
+                    Settings::dcp_retrans_per_round = 1;
+                }
+                std::cerr << "DCP_RETRANS_PER_ROUND\t\t" << Settings::dcp_retrans_per_round << "\n";
+            } else if (key.compare("DCP_ENABLE_TIMEOUT_RETX") == 0) {
+                conf >> Settings::dcp_enable_timeout_retx;
+                std::cerr << "DCP_ENABLE_TIMEOUT_RETX\t\t" << Settings::dcp_enable_timeout_retx
+                          << "\n";
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';

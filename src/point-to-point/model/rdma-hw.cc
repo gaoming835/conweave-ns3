@@ -556,8 +556,8 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
     uint8_t cnp = (ch.ack.flags >> qbbHeader::FLAG_CNP) & 1;
     int i;
     bool dcpHoReturn = false;
+    DcpTag dcpTag;
     if (Settings::enable_dcp) {
-        DcpTag dcpTag;
         dcpHoReturn = p->PeekPacketTag(dcpTag) && dcpTag.GetPacketType() == DcpTag::DCP_HO;
     }
     uint64_t key = GetQpKey(ch.sip, port, sport, qIndex);
@@ -581,6 +581,9 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
 
     if (dcpHoReturn) {
         Settings::dcp_ho_rx_at_sender++;
+        if (EnqueueDcpHoRetrans(qp, dcpTag)) {
+            Settings::dcp_retransq_enqueue++;
+        }
         dev->TriggerTransmit();
         return 0;
     }
@@ -662,7 +665,7 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
             }
         }
 
-    } else if (ch.l3Prot == 0xFD)  // NACK
+    } else if (ch.l3Prot == 0xFD && !Settings::enable_dcp)  // NACK
         RecoverQueue(qp);
 
     // handle cnp
@@ -684,6 +687,22 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
     // ACK may advance the on-the-fly window, allowing more packets to send
     dev->TriggerTransmit();
     return 0;
+}
+
+bool RdmaHw::EnqueueDcpHoRetrans(Ptr<RdmaQueuePair> qp, const DcpTag &hoTag) {
+    uint32_t psn = hoTag.GetPsn();
+    if (psn < qp->snd_una || psn >= qp->snd_nxt || psn >= qp->m_size) {
+        return false;
+    }
+    if (hoTag.GetSrc() != qp->sip || hoTag.GetDst() != qp->dip ||
+        hoTag.GetSrcPort() != qp->sport || hoTag.GetDstPort() != qp->dport ||
+        hoTag.GetPg() != qp->m_pg) {
+        return false;
+    }
+    if (hoTag.GetFlowId() >= 0 && qp->m_flow_id >= 0 && hoTag.GetFlowId() != qp->m_flow_id) {
+        return false;
+    }
+    return qp->EnqueueDcpRetrans(psn);
 }
 
 size_t RdmaHw::getIrnBufferOverhead() {
@@ -877,12 +896,28 @@ void RdmaHw::RedistributeQp() {
 }
 
 Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
-    uint32_t payload_size = qp->GetBytesLeft();
+    uint32_t dcpRetransSeq = 0;
+    bool dcpRetrans = false;
+    while (Settings::enable_dcp && qp->DequeueDcpRetrans(&dcpRetransSeq)) {
+        Settings::dcp_retransq_dequeue++;
+        if (dcpRetransSeq >= qp->snd_una && dcpRetransSeq < qp->snd_nxt &&
+            dcpRetransSeq < qp->m_size) {
+            dcpRetrans = true;
+            break;
+        }
+        Settings::dcp_spurious_retx++;
+    }
+
+    uint32_t payload_size = dcpRetrans ? (uint32_t)(qp->m_size - dcpRetransSeq)
+                                       : qp->GetBytesLeft();
+    if (payload_size == 0) {
+        return 0;
+    }
     if (m_mtu < payload_size) {  // possibly last packet
         payload_size = m_mtu;
     }
-    uint32_t seq = (uint32_t)qp->snd_nxt;
-    bool proceed_snd_nxt = true;
+    uint32_t seq = dcpRetrans ? dcpRetransSeq : (uint32_t)qp->snd_nxt;
+    bool proceed_snd_nxt = !dcpRetrans;
     qp->stat.txTotalPkts += 1;
     qp->stat.txTotalBytes += payload_size;
 
@@ -924,7 +959,9 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
         FlowStatTag fst;
         uint64_t size = qp->m_size;
         if (!p->PeekPacketTag(fst)) {
-            if (size < m_mtu && qp->snd_nxt + payload_size >= qp->m_size) {
+            if (dcpRetrans) {
+                fst.SetType(FlowStatTag::FLOW_NOTEND);
+            } else if (size < m_mtu && qp->snd_nxt + payload_size >= qp->m_size) {
                 fst.SetType(FlowStatTag::FLOW_START_AND_END);
             } else if (qp->snd_nxt + payload_size >= qp->m_size) {
                 fst.SetType(FlowStatTag::FLOW_END);
@@ -946,6 +983,9 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
                                   qp->m_pg);
         p->AddPacketTag(dcpDataTag);
         Settings::dcp_data_packets++;
+        if (dcpRetrans) {
+            Settings::dcp_precise_retx++;
+        }
     }
 
     if (qp->irn.m_enabled) {
@@ -995,6 +1035,8 @@ void RdmaHw::HandleTimeout(Ptr<RdmaQueuePair> qp, Time rto) {
     uint32_t nic_idx = GetNicIdxOfQp(qp);
     Ptr<QbbNetDevice> dev = m_nic[nic_idx].dev;
 
+    if (Settings::enable_dcp && !Settings::dcp_enable_timeout_retx) return;
+
     // IRN: disable timeouts when PFC is enabled to prevent spurious retransmissions
     if (qp->irn.m_enabled && dev->IsQbbEnabled()) return;
 
@@ -1003,6 +1045,8 @@ void RdmaHw::HandleTimeout(Ptr<RdmaQueuePair> qp, Time rto) {
     acc_timeout_count[qp->m_flow_id]++;
 
     if (qp->irn.m_enabled) qp->irn.m_recovery = true;
+
+    if (Settings::enable_dcp) Settings::dcp_timeout_retx++;
 
     RecoverQueue(qp);
     dev->TriggerTransmit();

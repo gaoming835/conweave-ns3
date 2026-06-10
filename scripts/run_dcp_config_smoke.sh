@@ -64,6 +64,8 @@ expected_fields=(
   dcp_ho_returned
   dcp_ho_rx_at_receiver
   dcp_ho_rx_at_sender
+  dcp_retransq_enqueue
+  dcp_retransq_dequeue
   dcp_precise_retx
   dcp_spurious_retx
   dcp_timeout_retx

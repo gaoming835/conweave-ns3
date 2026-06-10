@@ -150,6 +150,8 @@ class Settings {
     static uint64_t dcp_ho_returned;
     static uint64_t dcp_ho_rx_at_receiver;
     static uint64_t dcp_ho_rx_at_sender;
+    static uint64_t dcp_retransq_enqueue;
+    static uint64_t dcp_retransq_dequeue;
     static uint64_t dcp_precise_retx;
     static uint64_t dcp_spurious_retx;
     static uint64_t dcp_timeout_retx;
@@ -160,6 +162,8 @@ class Settings {
     static uint64_t control_queue_len;
     static uint64_t data_queue_len;
     static uint32_t dcp_trim_threshold;
+    static uint32_t dcp_retrans_per_round;
+    static bool dcp_enable_timeout_retx;
 };
 
 }  // namespace ns3

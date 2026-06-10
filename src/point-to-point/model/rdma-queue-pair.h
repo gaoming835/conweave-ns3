@@ -11,6 +11,8 @@
 #include <ns3/selective-packet-queue.h>
 
 #include <climits> /* for CHAR_BIT */
+#include <deque>
+#include <unordered_set>
 #include <vector>
 
 #define BITMASK(b) (1 << ((b) % CHAR_BIT))
@@ -154,6 +156,12 @@ class RdmaQueuePair : public Object {
         uint64_t txTotalBytes{0};
     } stat;
 
+    struct {
+        std::deque<uint32_t> m_retransQ;
+        std::unordered_set<uint32_t> m_retransSet;
+        uint32_t m_dequeuedThisRound;
+    } dcp;
+
     // Implement Timeout according to IB Spec Vol. 1 C9-139.
     // For an HCA requester using Reliable Connection service, to detect missing responses,
     // every Send queue is required to implement a Transport Timer to time outstanding requests.
@@ -177,6 +185,10 @@ class RdmaQueuePair : public Object {
     void Acknowledge(uint64_t ack);
     uint64_t GetOnTheFly();
     bool IsWinBound();
+    bool HasDcpRetrans(void) const;
+    bool EnqueueDcpRetrans(uint32_t psn);
+    bool DequeueDcpRetrans(uint32_t *psn);
+    void ResetDcpRetransRound(void);
     uint64_t GetWin();  // window size calculated from m_rate
     bool IsFinished();
     inline bool IsFinishedConst() const { return snd_una >= m_size; }

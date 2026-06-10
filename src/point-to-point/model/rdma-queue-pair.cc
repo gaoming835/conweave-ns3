@@ -87,6 +87,7 @@ RdmaQueuePair::RdmaQueuePair(uint16_t pg, Ipv4Address _sip, Ipv4Address _dip, ui
     irn.m_highest_ack = 0;
     irn.m_max_seq = 0;
     irn.m_recovery = false;
+    dcp.m_dequeuedThisRound = 0;
 
     m_timeout = MilliSeconds(4);
 }
@@ -149,6 +150,42 @@ uint64_t RdmaQueuePair::GetOnTheFly() {
 bool RdmaQueuePair::IsWinBound() {
     uint64_t w = GetWin();
     return w != 0 && GetOnTheFly() >= w;
+}
+
+bool RdmaQueuePair::HasDcpRetrans(void) const {
+    return !dcp.m_retransQ.empty();
+}
+
+bool RdmaQueuePair::EnqueueDcpRetrans(uint32_t psn) {
+    if (dcp.m_retransSet.find(psn) != dcp.m_retransSet.end()) {
+        return false;
+    }
+    dcp.m_retransQ.push_back(psn);
+    dcp.m_retransSet.insert(psn);
+    return true;
+}
+
+bool RdmaQueuePair::DequeueDcpRetrans(uint32_t *psn) {
+    if (dcp.m_retransQ.empty()) {
+        dcp.m_dequeuedThisRound = 0;
+        return false;
+    }
+    if (Settings::dcp_retrans_per_round == 0) {
+        return false;
+    }
+    if (dcp.m_dequeuedThisRound >= Settings::dcp_retrans_per_round) {
+        dcp.m_dequeuedThisRound = 0;
+        return false;
+    }
+    *psn = dcp.m_retransQ.front();
+    dcp.m_retransQ.pop_front();
+    dcp.m_retransSet.erase(*psn);
+    dcp.m_dequeuedThisRound++;
+    return true;
+}
+
+void RdmaQueuePair::ResetDcpRetransRound(void) {
+    dcp.m_dequeuedThisRound = 0;
 }
 
 uint64_t RdmaQueuePair::GetWin() {
