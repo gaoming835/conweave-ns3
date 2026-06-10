@@ -351,86 +351,112 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
         }
     }
 
+    if (Settings::enable_dcp) {
+        FlowIDNUMTag fit;
+        uint32_t flowSize = ch.udp.seq + payload_size;
+        if (p->PeekPacketTag(fit)) {
+            flowSize = fit.GetFlowSize();
+            if (rxQp->m_flow_id < 0) {
+                rxQp->m_flow_id = fit.GetId();
+            }
+        }
+
+        bool ooo = false;
+        uint32_t ackSeq = 0;
+        bool completed = rxQp->DcpRecordPacket(ch.udp.seq, payload_size, flowSize, &ackSeq, &ooo);
+        if (ooo) {
+            Settings::dcp_ooo_packets++;
+        }
+        if (completed) {
+            Settings::dcp_completed_messages++;
+            SendAck(rxQp, p, ch, ackSeq, 0xFC, false, false, false);
+        }
+        return 0;
+    }
+
     bool cnp_check = false;
     int x = ReceiverCheckSeq(ch.udp.seq, rxQp, payload_size, cnp_check);
 
     if (x == 1 || x == 2 || x == 6) {  // generate ACK or NACK
-        qbbHeader seqh;
-        seqh.SetSeq(rxQp->ReceiverNextExpectedSeq);
-        seqh.SetPG(ch.udp.pg);
-        seqh.SetSport(ch.udp.dport);
-        seqh.SetDport(ch.udp.sport);
-        seqh.SetIntHeader(ch.udp.ih);
-
-        if (m_irn) {
-            if (x == 2) {
-                seqh.SetIrnNack(ch.udp.seq);
-                seqh.SetIrnNackSize(payload_size);
-            } else {
-                seqh.SetIrnNack(0);  // NACK without ackSyndrome (ACK) in loss recovery mode
-                seqh.SetIrnNackSize(0);
-            }
-        }
-
-        if (ecnbits || cnp_check) {  // NACK accompanies with CNP packet
-            // XXX monitor CNP generation at sender
-            cnp_total++;
-            if (ecnbits) cnp_by_ecn++;
-            if (cnp_check) cnp_by_ooo++;
-            seqh.SetCnp();
-        }
-
-        BccTag bccFeedback;
-        bool hasBccTag = p->PeekPacketTag(bccFeedback);
-        if (m_cc_mode == 10 || hasBccTag) {
-            uint8_t bccState = m_cc_mode == 10 ? BccTag::EcnBitsToState(ecnbits)
-                                               : bccFeedback.GetState();
-            double bccUtilization = hasBccTag ? bccFeedback.GetLinkUtilization()
-                                              : (bccState == BccTag::TU ? 0.5 : 1.0);
-            seqh.SetBccFeedback(bccState, bccUtilization);
-        }
-
-        Ptr<Packet> newp =
-            Create<Packet>(std::max(60 - 14 - 20 - (int)seqh.GetSerializedSize(), 0));
-        newp->AddHeader(seqh);
-
-        Ipv4Header head;  // Prepare IPv4 header
-        head.SetDestination(Ipv4Address(ch.sip));
-        head.SetSource(Ipv4Address(ch.dip));
-        head.SetProtocol(x == 1 ? 0xFC : 0xFD);  // ack=0xFC nack=0xFD
-        head.SetTtl(64);
-        head.SetPayloadSize(newp->GetSize());
-        head.SetIdentification(rxQp->m_ipid++);
-
-        {
-            FlowIDNUMTag fit;
-            if (p->PeekPacketTag(fit)) {
-                newp->AddPacketTag(fit);
-            }
-            if (hasBccTag) {
-                newp->AddPacketTag(bccFeedback);
-            }
-        }
-
-        if (Settings::enable_dcp) {
-            DcpTag dcpAckTag;
-            dcpAckTag.SetPacketType(DcpTag::DCP_ACK);
-            dcpAckTag.SetOriginalData(rxQp->m_flow_id, seqh.GetSeq(), Ipv4Address(ch.dip),
-                                      Ipv4Address(ch.sip), ch.udp.dport, ch.udp.sport,
-                                      ch.udp.pg);
-            newp->AddPacketTag(dcpAckTag);
-            Settings::dcp_ack_packets++;
-        }
-
-        newp->AddHeader(head);
-        AddHeader(newp, 0x800);  // Attach PPP header
-
-        // send
-        uint32_t nic_idx = GetNicIdxOfRxQp(rxQp);
-        m_nic[nic_idx].dev->RdmaEnqueueHighPrioQ(newp);
-        m_nic[nic_idx].dev->TriggerTransmit();
+        SendAck(rxQp, p, ch, rxQp->ReceiverNextExpectedSeq, x == 1 ? 0xFC : 0xFD,
+                ecnbits || cnp_check, cnp_check, x == 2);
     }
     return 0;
+}
+
+void RdmaHw::SendAck(Ptr<RdmaRxQueuePair> rxQp, Ptr<Packet> p, CustomHeader &ch,
+                     uint32_t ackSeq, uint8_t protocol, bool cnp, bool cnpByOoo,
+                     bool irnNack) {
+    qbbHeader seqh;
+    seqh.SetSeq(ackSeq);
+    seqh.SetPG(ch.udp.pg);
+    seqh.SetSport(ch.udp.dport);
+    seqh.SetDport(ch.udp.sport);
+    seqh.SetIntHeader(ch.udp.ih);
+
+    if (m_irn) {
+        if (irnNack) {
+            uint32_t payloadSize = p->GetSize() - ch.GetSerializedSize();
+            seqh.SetIrnNack(ch.udp.seq);
+            seqh.SetIrnNackSize(payloadSize);
+        } else {
+            seqh.SetIrnNack(0);
+            seqh.SetIrnNackSize(0);
+        }
+    }
+
+    if (cnp) {
+        cnp_total++;
+        if (ch.GetIpv4EcnBits()) cnp_by_ecn++;
+        if (cnpByOoo) cnp_by_ooo++;
+        seqh.SetCnp();
+    }
+
+    BccTag bccFeedback;
+    bool hasBccTag = p->PeekPacketTag(bccFeedback);
+    if (m_cc_mode == 10 || hasBccTag) {
+        uint8_t bccState =
+            m_cc_mode == 10 ? BccTag::EcnBitsToState(ch.GetIpv4EcnBits()) : bccFeedback.GetState();
+        double bccUtilization =
+            hasBccTag ? bccFeedback.GetLinkUtilization() : (bccState == BccTag::TU ? 0.5 : 1.0);
+        seqh.SetBccFeedback(bccState, bccUtilization);
+    }
+
+    Ptr<Packet> newp =
+        Create<Packet>(std::max(60 - 14 - 20 - (int)seqh.GetSerializedSize(), 0));
+    newp->AddHeader(seqh);
+
+    Ipv4Header head;
+    head.SetDestination(Ipv4Address(ch.sip));
+    head.SetSource(Ipv4Address(ch.dip));
+    head.SetProtocol(protocol);
+    head.SetTtl(64);
+    head.SetPayloadSize(newp->GetSize());
+    head.SetIdentification(rxQp->m_ipid++);
+
+    FlowIDNUMTag fit;
+    if (p->PeekPacketTag(fit)) {
+        newp->AddPacketTag(fit);
+    }
+    if (hasBccTag) {
+        newp->AddPacketTag(bccFeedback);
+    }
+
+    if (Settings::enable_dcp) {
+        DcpTag dcpAckTag;
+        dcpAckTag.SetPacketType(DcpTag::DCP_ACK);
+        dcpAckTag.SetOriginalData(rxQp->m_flow_id, seqh.GetSeq(), Ipv4Address(ch.dip),
+                                  Ipv4Address(ch.sip), ch.udp.dport, ch.udp.sport, ch.udp.pg);
+        newp->AddPacketTag(dcpAckTag);
+        Settings::dcp_ack_packets++;
+    }
+
+    newp->AddHeader(head);
+    AddHeader(newp, 0x800);
+
+    uint32_t nic_idx = GetNicIdxOfRxQp(rxQp);
+    m_nic[nic_idx].dev->RdmaEnqueueHighPrioQ(newp);
+    m_nic[nic_idx].dev->TriggerTransmit();
 }
 
 void RdmaHw::ReturnDcpHo(Ptr<Packet> p, CustomHeader &ch, const DcpTag &hoTag) {

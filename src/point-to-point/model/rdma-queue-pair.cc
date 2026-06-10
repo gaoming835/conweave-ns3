@@ -242,6 +242,56 @@ RdmaRxQueuePair::RdmaRxQueuePair() {
     m_nackTimer = Time(0);
     m_milestone_rx = 0;
     m_lastNACK = 0;
+    m_flow_id = -1;
+    m_dcp_flow_size = 0;
+    m_dcp_completed = false;
+}
+
+bool RdmaRxQueuePair::DcpRecordPacket(uint32_t seq, uint32_t size, uint32_t flowSize,
+                                      uint32_t *ackSeq, bool *ooo) {
+    if (ooo != 0) {
+        *ooo = seq > ReceiverNextExpectedSeq;
+    }
+    if (flowSize > m_dcp_flow_size) {
+        m_dcp_flow_size = flowSize;
+    }
+    if (m_dcp_flow_size == 0) {
+        m_dcp_flow_size = seq + size;
+    }
+    if (seq >= m_dcp_flow_size) {
+        return false;
+    }
+    if (seq + size > m_dcp_flow_size) {
+        size = m_dcp_flow_size - seq;
+    }
+
+    m_dcp_received[seq] = std::max(m_dcp_received[seq], size);
+    bool advanced = true;
+    while (advanced) {
+        advanced = false;
+        for (auto it = m_dcp_received.begin(); it != m_dcp_received.end();) {
+            uint32_t blockSeq = it->first;
+            uint32_t blockEnd = blockSeq + it->second;
+            if (blockSeq <= ReceiverNextExpectedSeq && blockEnd > ReceiverNextExpectedSeq) {
+                ReceiverNextExpectedSeq = blockEnd;
+                it = m_dcp_received.erase(it);
+                advanced = true;
+            } else if (blockEnd <= ReceiverNextExpectedSeq) {
+                it = m_dcp_received.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    if (!m_dcp_completed && ReceiverNextExpectedSeq >= m_dcp_flow_size) {
+        m_dcp_completed = true;
+        if (ackSeq != 0) {
+            *ackSeq = ReceiverNextExpectedSeq;
+        }
+        return true;
+    }
+    return false;
 }
 
 uint32_t RdmaRxQueuePair::GetHash(void) {

@@ -12,6 +12,7 @@
 
 #include <climits> /* for CHAR_BIT */
 #include <deque>
+#include <map>
 #include <unordered_set>
 #include <vector>
 
@@ -241,9 +242,14 @@ class RdmaRxQueuePair : public Object {  // Rx side queue pair
     EventId QcnTimerEvent;  // if destroy this rxQp, remember to cancel this timer
     IrnSackManager m_irn_sack_;
     int32_t m_flow_id;
+    uint32_t m_dcp_flow_size;
+    bool m_dcp_completed;
+    std::map<uint32_t, uint32_t> m_dcp_received;
 
     static TypeId GetTypeId(void);
     RdmaRxQueuePair();
+    bool DcpRecordPacket(uint32_t seq, uint32_t size, uint32_t flowSize, uint32_t *ackSeq,
+                         bool *ooo);
     uint32_t GetHash(void);
 };
 

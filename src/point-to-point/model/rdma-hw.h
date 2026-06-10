@@ -83,6 +83,8 @@ class RdmaHw : public Object {
     int ReceiveUdp(Ptr<Packet> p, CustomHeader &ch);
     int ReceiveCnp(Ptr<Packet> p, CustomHeader &ch);
     int ReceiveAck(Ptr<Packet> p, CustomHeader &ch);  // handle both ACK and NACK
+    void SendAck(Ptr<RdmaRxQueuePair> rxQp, Ptr<Packet> p, CustomHeader &ch, uint32_t ackSeq,
+                 uint8_t protocol, bool cnp, bool cnpByOoo, bool irnNack);
     void ReturnDcpHo(Ptr<Packet> p, CustomHeader &ch, const DcpTag &hoTag);
     bool EnqueueDcpHoRetrans(Ptr<RdmaQueuePair> qp, const DcpTag &hoTag);
     int Receive(Ptr<Packet> p,
