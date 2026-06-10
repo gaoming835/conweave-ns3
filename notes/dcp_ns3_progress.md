@@ -193,3 +193,49 @@ Accepted result:
   DCP+AR tolerates OOO packets without spurious DCP retransmission.
 - The AR policy is still a local queue-byte heuristic, not a full paper-scale AR
   evaluation; Phase 7 should use larger workloads for paper figure reproduction.
+
+## Phase 6: Retransmission Rate Control and Timeout Fallback
+
+Date: 2026-06-10
+
+Implemented behavior:
+
+- DCP RetransQ entries now carry a source: HO-return or timeout fallback.
+- `DCP_RETRANS_PER_ROUND` is preserved as a compatibility alias, while the primary
+  configuration is now:
+  `DCP_RETRANS_BATCH_SIZE`, `DCP_RETRANS_QUOTA_BYTES`, and
+  `DCP_RETRANS_RESPECT_WIN`.
+- `DCP_RETRANS_BATCH_SIZE=0` disables DCP retrans dequeue; positive values bound the
+  number of RetransQ packets dequeued per scheduling round.
+- `DCP_RETRANS_QUOTA_BYTES=0` disables byte quota; positive values bound retransmitted
+  payload bytes per scheduling round.
+- `DCP_RETRANS_RESPECT_WIN=1` makes DCP retransmission wait behind the normal QP window
+  bound; the default `0` preserves the paper-style decoupled RetransQ fast path.
+- Timeout fallback remains off by default. When enabled, timeout recovery enqueues
+  outstanding PSNs into the same DCP RetransQ with timeout source tags instead of using
+  the normal RDMA `snd_nxt` rewind path.
+- Retransmitted packets still use DCP DATA type and carry `sRetryNo=1`, so switch trim can
+  re-trim them and count that as retrans re-trim.
+- New DCP stats are exported:
+  `dcp_retrans_bytes`, `dcp_retrans_from_ho`, `dcp_retrans_from_timeout`, and
+  `dcp_retrans_retrimmed`.
+
+Validation:
+
+| Script | Status | Run ID | Key stats |
+| --- | --- | --- | --- |
+| `./waf --run dcp-retrans-queue-test` | pass | N/A, unit smoke | `dcp_retrans_queue_unit=pass`; validates source tags, duplicate suppression, batch limit, byte quota, and respect-window gating |
+| `scripts/run_dcp_retrans_smoke.sh` | pass | `51119803` | runs the queue unit plus a no-trim DCP config/export smoke; `dcp_retransq_enqueue=0`, `dcp_retransq_dequeue=0`, `dcp_precise_retx=0`, `dcp_timeout_retx=0`, `dcp_retrans_bytes=0`, `dcp_retrans_from_ho=0`, `dcp_retrans_from_timeout=0`, `dcp_retrans_retrimmed=0`, `dcp_spurious_retx=0` |
+| `scripts/run_dcp_config_smoke.sh` | pass | `127929921` | default config exports `DCP_RETRANS_BATCH_SIZE 1`, `DCP_RETRANS_QUOTA_BYTES 0`, `DCP_RETRANS_RESPECT_WIN 0`; all Phase 6 stats fields are present and zero in the no-trim baseline |
+
+Accepted result:
+
+- HO-origin and timeout-origin retransmissions are now distinguishable in the retrans queue
+  and exported stats.
+- Retransmission rate is configurable by packet batch size, byte quota, and optional
+  window-respect mode.
+- The default smoke intentionally keeps the simulation no-trim and fast; the detailed HO
+  trim/retrans path is covered by earlier trim/HO-return smokes, while Phase 6 queue
+  semantics are covered by the new unit test.
+- A full HO-loss recovery scenario and severe-incast quota/FCT sensitivity comparison are
+  not yet paper-grade validations; they should become Phase 7 experiment harness cases.

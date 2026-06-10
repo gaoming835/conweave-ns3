@@ -8,6 +8,8 @@
 #include <ns3/udp-header.h>
 #include <ns3/uinteger.h>
 
+#include <algorithm>
+
 #include "ns3/ppp-header.h"
 #include "ns3/settings.h"
 #include "rdma-hw.h"
@@ -88,6 +90,7 @@ RdmaQueuePair::RdmaQueuePair(uint16_t pg, Ipv4Address _sip, Ipv4Address _dip, ui
     irn.m_max_seq = 0;
     irn.m_recovery = false;
     dcp.m_dequeuedThisRound = 0;
+    dcp.m_dequeuedBytesThisRound = 0;
 
     m_timeout = MilliSeconds(4);
 }
@@ -156,36 +159,67 @@ bool RdmaQueuePair::HasDcpRetrans(void) const {
     return !dcp.m_retransQ.empty();
 }
 
-bool RdmaQueuePair::EnqueueDcpRetrans(uint32_t psn) {
+bool RdmaQueuePair::CanSendDcpRetrans(void) {
+    if (!HasDcpRetrans()) {
+        return false;
+    }
+    return !Settings::dcp_retrans_respect_win || !IsWinBound();
+}
+
+bool RdmaQueuePair::EnqueueDcpRetrans(uint32_t psn, uint8_t source) {
     if (dcp.m_retransSet.find(psn) != dcp.m_retransSet.end()) {
         return false;
     }
-    dcp.m_retransQ.push_back(psn);
+    DcpRetransSource validSource =
+        source == DCP_RETRANS_FROM_TIMEOUT ? DCP_RETRANS_FROM_TIMEOUT : DCP_RETRANS_FROM_HO;
+    dcp.m_retransQ.push_back({psn, validSource});
     dcp.m_retransSet.insert(psn);
     return true;
 }
 
-bool RdmaQueuePair::DequeueDcpRetrans(uint32_t *psn) {
+bool RdmaQueuePair::DequeueDcpRetrans(uint32_t *psn, uint8_t *source, uint32_t mtu) {
     if (dcp.m_retransQ.empty()) {
-        dcp.m_dequeuedThisRound = 0;
+        ResetDcpRetransRound();
         return false;
     }
-    if (Settings::dcp_retrans_per_round == 0) {
+    uint32_t batchSize = Settings::dcp_retrans_batch_size;
+    if (batchSize == 0) {
         return false;
     }
-    if (dcp.m_dequeuedThisRound >= Settings::dcp_retrans_per_round) {
-        dcp.m_dequeuedThisRound = 0;
+    if (dcp.m_dequeuedThisRound >= batchSize) {
+        ResetDcpRetransRound();
         return false;
     }
-    *psn = dcp.m_retransQ.front();
+
+    DcpRetransEntry entry = dcp.m_retransQ.front();
+    uint32_t retransBytes = 0;
+    if (entry.psn < m_size) {
+        retransBytes = (uint32_t)std::min<uint64_t>(mtu, m_size - entry.psn);
+    }
+    uint32_t quotaBytes = Settings::dcp_retrans_quota_bytes;
+    if (quotaBytes > 0 && dcp.m_dequeuedBytesThisRound > 0 &&
+        dcp.m_dequeuedBytesThisRound + retransBytes > quotaBytes) {
+        ResetDcpRetransRound();
+        return false;
+    }
+
+    *psn = entry.psn;
+    if (source != NULL) {
+        *source = entry.source;
+    }
     dcp.m_retransQ.pop_front();
-    dcp.m_retransSet.erase(*psn);
+    dcp.m_retransSet.erase(entry.psn);
     dcp.m_dequeuedThisRound++;
+    dcp.m_dequeuedBytesThisRound += retransBytes;
+    if (dcp.m_retransQ.empty()) {
+        ResetDcpRetransRound();
+    }
     return true;
 }
 
 void RdmaQueuePair::ResetDcpRetransRound(void) {
     dcp.m_dequeuedThisRound = 0;
+    dcp.m_dequeuedBytesThisRound = 0;
 }
 
 uint64_t RdmaQueuePair::GetWin() {

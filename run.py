@@ -180,9 +180,10 @@ def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
             "CONFIG ERROR : BCC feedback is carried by ACKs, so ACK_HIGH_PRIO must be 1.")
 
 
-def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retrans_per_round,
-                           enable_timeout_retx, enable_wrr, control_weight, data_weight,
-                           inc_scale_n, ho_data_ratio_r, enable_message_tracking):
+def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retrans_batch_size,
+                           retrans_quota_bytes, retrans_respect_win, enable_timeout_retx,
+                           enable_wrr, control_weight, data_weight, inc_scale_n,
+                           ho_data_ratio_r, enable_message_tracking):
     if not enable_dcp:
         return ""
     return (
@@ -191,7 +192,10 @@ def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retra
         "DCP_STATS_FILE mix/output/{id}/{id}_out_dcp_stats.txt\n"
         "DCP_TRIM_THRESHOLD {trim_threshold}\n"
         "DCP_HO_SIZE {ho_size}\n"
-        "DCP_RETRANS_PER_ROUND {retrans_per_round}\n"
+        "DCP_RETRANS_BATCH_SIZE {retrans_batch_size}\n"
+        "DCP_RETRANS_QUOTA_BYTES {retrans_quota_bytes}\n"
+        "DCP_RETRANS_RESPECT_WIN {retrans_respect_win}\n"
+        "DCP_RETRANS_PER_ROUND {retrans_batch_size}\n"
         "DCP_ENABLE_TIMEOUT_RETX {enable_timeout_retx}\n"
         "DCP_ENABLE_WRR {enable_wrr}\n"
         "DCP_CONTROL_WEIGHT {control_weight}\n"
@@ -201,7 +205,9 @@ def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retra
         "DCP_ENABLE_MESSAGE_TRACKING {enable_message_tracking}\n"
     ).format(id=config_id, trim_threshold=trim_threshold,
              ho_size=ho_size,
-             retrans_per_round=retrans_per_round,
+             retrans_batch_size=retrans_batch_size,
+             retrans_quota_bytes=retrans_quota_bytes,
+             retrans_respect_win=retrans_respect_win,
              enable_timeout_retx=enable_timeout_retx,
              enable_wrr=enable_wrr,
              control_weight=control_weight,
@@ -267,7 +273,16 @@ def main():
                         help="DCP header-only packet size in bytes; 0 uses the current parsed header size (default: 0)")
     parser.add_argument('--dcp_retrans_per_round', dest='dcp_retrans_per_round', action='store',
                         type=int, default=1,
-                        help="DCP precise retransmissions dequeued per scheduling round (default: 1)")
+                        help="compat alias for --dcp_retrans_batch_size (default: 1)")
+    parser.add_argument('--dcp_retrans_batch_size', dest='dcp_retrans_batch_size', action='store',
+                        type=int, default=None,
+                        help="DCP RetransQ packets dequeued per scheduling round; 0 disables DCP retransmission (default: 1)")
+    parser.add_argument('--dcp_retrans_quota_bytes', dest='dcp_retrans_quota_bytes',
+                        action='store', type=int, default=0,
+                        help="DCP RetransQ byte quota per scheduling round; 0 disables byte quota (default: 0)")
+    parser.add_argument('--dcp_retrans_respect_win', dest='dcp_retrans_respect_win',
+                        action='store', type=int, default=0,
+                        help="make DCP retransmission wait for the normal CC/window bound (default: 0)")
     parser.add_argument('--dcp_enable_timeout_retx', dest='dcp_enable_timeout_retx', action='store',
                         type=int, default=0,
                         help="enable DCP fallback timeout retransmission (default: 0)")
@@ -347,6 +362,13 @@ def main():
               file=sys.stderr)
         enable_bcc = 1
     ack_high_prio = int(args.ack_high_prio)
+    dcp_retrans_batch_size = args.dcp_retrans_batch_size
+    if dcp_retrans_batch_size is None:
+        dcp_retrans_batch_size = args.dcp_retrans_per_round
+    if dcp_retrans_batch_size < 0:
+        raise Exception("CONFIG ERROR : --dcp_retrans_batch_size must be >= 0.")
+    if args.dcp_retrans_quota_bytes < 0:
+        raise Exception("CONFIG ERROR : --dcp_retrans_quota_bytes must be >= 0.")
     try:
         validate_bcc_config(cc_mode, enable_bcc, ack_high_prio)
     except Exception as e:
@@ -562,7 +584,9 @@ def main():
                                         dcp_config_block=build_dcp_config_block(
                                             enable_dcp, config_ID, args.dcp_trim_threshold,
                                             args.dcp_ho_size,
-                                            args.dcp_retrans_per_round,
+                                            dcp_retrans_batch_size,
+                                            args.dcp_retrans_quota_bytes,
+                                            args.dcp_retrans_respect_win,
                                             args.dcp_enable_timeout_retx,
                                             args.dcp_enable_wrr,
                                             args.dcp_control_weight,

@@ -652,6 +652,10 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_precise_retx,%lu\n", Settings::dcp_precise_retx);
     fprintf(fout, "dcp_spurious_retx,%lu\n", Settings::dcp_spurious_retx);
     fprintf(fout, "dcp_timeout_retx,%lu\n", Settings::dcp_timeout_retx);
+    fprintf(fout, "dcp_retrans_bytes,%lu\n", Settings::dcp_retrans_bytes);
+    fprintf(fout, "dcp_retrans_from_ho,%lu\n", Settings::dcp_retrans_from_ho);
+    fprintf(fout, "dcp_retrans_from_timeout,%lu\n", Settings::dcp_retrans_from_timeout);
+    fprintf(fout, "dcp_retrans_retrimmed,%lu\n", Settings::dcp_retrans_retrimmed);
     fprintf(fout, "dcp_ooo_packets,%lu\n", Settings::dcp_ooo_packets);
     fprintf(fout, "dcp_duplicate_packets,%lu\n", Settings::dcp_duplicate_packets);
     fprintf(fout, "dcp_retransmitted_packets,%lu\n", Settings::dcp_retransmitted_packets);
@@ -670,6 +674,10 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_data_weight,%u\n", Settings::dcp_data_weight);
     fprintf(fout, "dcp_inc_scale_n,%u\n", Settings::dcp_inc_scale_n);
     fprintf(fout, "dcp_ho_data_ratio_r,%.6f\n", Settings::dcp_ho_data_ratio_r);
+    fprintf(fout, "dcp_retrans_batch_size,%u\n", Settings::dcp_retrans_batch_size);
+    fprintf(fout, "dcp_retrans_quota_bytes,%u\n", Settings::dcp_retrans_quota_bytes);
+    fprintf(fout, "dcp_retrans_respect_win,%u\n",
+            Settings::dcp_retrans_respect_win ? 1 : 0);
     fprintf(fout, "dcp_enable_message_tracking,%u\n",
             Settings::dcp_enable_message_tracking ? 1 : 0);
     fprintf(fout, "dcp_control_queue_max_len,%lu\n", Settings::dcp_control_queue_max_len);
@@ -1316,10 +1324,21 @@ int main(int argc, char *argv[]) {
                 std::cerr << "DCP_HO_SIZE\t\t\t\t" << Settings::dcp_ho_size << "\n";
             } else if (key.compare("DCP_RETRANS_PER_ROUND") == 0) {
                 conf >> Settings::dcp_retrans_per_round;
-                if (Settings::dcp_retrans_per_round == 0) {
-                    Settings::dcp_retrans_per_round = 1;
-                }
+                Settings::dcp_retrans_batch_size = Settings::dcp_retrans_per_round;
                 std::cerr << "DCP_RETRANS_PER_ROUND\t\t" << Settings::dcp_retrans_per_round << "\n";
+            } else if (key.compare("DCP_RETRANS_BATCH_SIZE") == 0) {
+                conf >> Settings::dcp_retrans_batch_size;
+                Settings::dcp_retrans_per_round = Settings::dcp_retrans_batch_size;
+                std::cerr << "DCP_RETRANS_BATCH_SIZE\t\t" << Settings::dcp_retrans_batch_size
+                          << "\n";
+            } else if (key.compare("DCP_RETRANS_QUOTA_BYTES") == 0) {
+                conf >> Settings::dcp_retrans_quota_bytes;
+                std::cerr << "DCP_RETRANS_QUOTA_BYTES\t\t"
+                          << Settings::dcp_retrans_quota_bytes << "\n";
+            } else if (key.compare("DCP_RETRANS_RESPECT_WIN") == 0) {
+                conf >> Settings::dcp_retrans_respect_win;
+                std::cerr << "DCP_RETRANS_RESPECT_WIN\t\t"
+                          << Settings::dcp_retrans_respect_win << "\n";
             } else if (key.compare("DCP_ENABLE_TIMEOUT_RETX") == 0) {
                 conf >> Settings::dcp_enable_timeout_retx;
                 std::cerr << "DCP_ENABLE_TIMEOUT_RETX\t\t" << Settings::dcp_enable_timeout_retx

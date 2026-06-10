@@ -54,6 +54,9 @@ grep -q '^ENABLE_DCP 1$' "${run_dir}/config.txt"
 grep -q '^TRANSPORT_MODE dcp$' "${run_dir}/config.txt"
 grep -q '^DCP_STATS_FILE ' "${run_dir}/config.txt"
 grep -q '^DCP_HO_SIZE 0$' "${run_dir}/config.txt"
+grep -q '^DCP_RETRANS_BATCH_SIZE 1$' "${run_dir}/config.txt"
+grep -q '^DCP_RETRANS_QUOTA_BYTES 0$' "${run_dir}/config.txt"
+grep -q '^DCP_RETRANS_RESPECT_WIN 0$' "${run_dir}/config.txt"
 grep -q '^DCP_ENABLE_WRR 0$' "${run_dir}/config.txt"
 grep -q '^DCP_CONTROL_WEIGHT 1$' "${run_dir}/config.txt"
 grep -q '^DCP_DATA_WEIGHT 1$' "${run_dir}/config.txt"
@@ -73,6 +76,10 @@ expected_fields=(
   dcp_precise_retx
   dcp_spurious_retx
   dcp_timeout_retx
+  dcp_retrans_bytes
+  dcp_retrans_from_ho
+  dcp_retrans_from_timeout
+  dcp_retrans_retrimmed
   dcp_ooo_packets
   dcp_completed_messages
   dcp_ho_dropped
@@ -88,6 +95,9 @@ expected_fields=(
   dcp_data_weight
   dcp_inc_scale_n
   dcp_ho_data_ratio_r
+  dcp_retrans_batch_size
+  dcp_retrans_quota_bytes
+  dcp_retrans_respect_win
   dcp_control_queue_max_len
   dcp_data_queue_max_len
   dcp_control_queue_avg_len
@@ -119,9 +129,16 @@ grep -q '^dcp_non_dropped,0$' "${stats_file}"
 grep -q '^dcp_ack_dropped,0$' "${stats_file}"
 grep -q '^dcp_ho_bytes,0$' "${stats_file}"
 grep -q '^dcp_data_bytes_trimmed,0$' "${stats_file}"
+grep -q '^dcp_retrans_bytes,0$' "${stats_file}"
+grep -q '^dcp_retrans_from_ho,0$' "${stats_file}"
+grep -q '^dcp_retrans_from_timeout,0$' "${stats_file}"
+grep -q '^dcp_retrans_retrimmed,0$' "${stats_file}"
 grep -q '^dcp_enable_wrr,0$' "${stats_file}"
 grep -q '^dcp_control_weight,1$' "${stats_file}"
 grep -q '^dcp_data_weight,1$' "${stats_file}"
+grep -q '^dcp_retrans_batch_size,1$' "${stats_file}"
+grep -q '^dcp_retrans_quota_bytes,0$' "${stats_file}"
+grep -q '^dcp_retrans_respect_win,0$' "${stats_file}"
 grep -q '^ar_packets,0$' "${stats_file}"
 grep -q '^ar_path_switches,0$' "${stats_file}"
 grep -q '^ar_used_next_hops,0$' "${stats_file}"

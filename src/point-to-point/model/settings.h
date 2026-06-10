@@ -155,6 +155,10 @@ class Settings {
     static uint64_t dcp_precise_retx;
     static uint64_t dcp_spurious_retx;
     static uint64_t dcp_timeout_retx;
+    static uint64_t dcp_retrans_bytes;
+    static uint64_t dcp_retrans_from_ho;
+    static uint64_t dcp_retrans_from_timeout;
+    static uint64_t dcp_retrans_retrimmed;
     static uint64_t dcp_ooo_packets;
     static uint64_t dcp_duplicate_packets;
     static uint64_t dcp_retransmitted_packets;
@@ -192,6 +196,9 @@ class Settings {
     static uint32_t dcp_trim_threshold;
     static uint32_t dcp_ho_size;
     static uint32_t dcp_retrans_per_round;
+    static uint32_t dcp_retrans_batch_size;
+    static uint32_t dcp_retrans_quota_bytes;
+    static bool dcp_retrans_respect_win;
     static bool dcp_enable_timeout_retx;
     static bool dcp_enable_message_tracking;
 };

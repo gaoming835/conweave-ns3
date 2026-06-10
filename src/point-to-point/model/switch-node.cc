@@ -556,6 +556,9 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
         Settings::dcp_ho_bytes += ho->GetSize();
         Settings::dcp_data_bytes_trimmed +=
             p->GetSize() > ho->GetSize() ? p->GetSize() - ho->GetSize() : 0;
+        if (dcpTag.GetSRetryNo() > 0) {
+            Settings::dcp_retrans_retrimmed++;
+        }
         Settings::data_queue_len = std::max<uint64_t>(Settings::data_queue_len, dataQueueBytes);
         Ptr<QbbNetDevice> device = DynamicCast<QbbNetDevice>(m_devices[outDev]);
         if (device != NULL && device->GetQueue() != NULL) {

@@ -153,7 +153,7 @@ int RdmaEgressQueue::GetNextQindex(bool paused[]) {
         if (m_qpGrp->IsQpFinished((qIndex + m_rrlast) % fcount)) continue;
         Ptr<RdmaQueuePair> qp = m_qpGrp->Get((qIndex + m_rrlast) % fcount);
         bool cond1 = !paused[qp->m_pg];
-        bool cond_dcp_retrans = Settings::enable_dcp && qp->HasDcpRetrans();
+        bool cond_dcp_retrans = Settings::enable_dcp && qp->CanSendDcpRetrans();
         bool cond_window_allowed =
             cond_dcp_retrans ||
             (!qp->IsWinBound() && (!qp->irn.m_enabled || qp->CanIrnTransmit(m_mtu)));

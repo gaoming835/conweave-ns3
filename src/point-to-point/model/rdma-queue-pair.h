@@ -158,10 +158,21 @@ class RdmaQueuePair : public Object {
         uint64_t txTotalBytes{0};
     } stat;
 
+    enum DcpRetransSource : uint8_t {
+        DCP_RETRANS_FROM_HO = 1,
+        DCP_RETRANS_FROM_TIMEOUT = 2,
+    };
+
+    struct DcpRetransEntry {
+        uint32_t psn;
+        uint8_t source;
+    };
+
     struct {
-        std::deque<uint32_t> m_retransQ;
+        std::deque<DcpRetransEntry> m_retransQ;
         std::unordered_set<uint32_t> m_retransSet;
         uint32_t m_dequeuedThisRound;
+        uint32_t m_dequeuedBytesThisRound;
     } dcp;
 
     // Implement Timeout according to IB Spec Vol. 1 C9-139.
@@ -188,8 +199,9 @@ class RdmaQueuePair : public Object {
     uint64_t GetOnTheFly();
     bool IsWinBound();
     bool HasDcpRetrans(void) const;
-    bool EnqueueDcpRetrans(uint32_t psn);
-    bool DequeueDcpRetrans(uint32_t *psn);
+    bool CanSendDcpRetrans(void);
+    bool EnqueueDcpRetrans(uint32_t psn, uint8_t source);
+    bool DequeueDcpRetrans(uint32_t *psn, uint8_t *source, uint32_t mtu);
     void ResetDcpRetransRound(void);
     uint64_t GetWin();  // window size calculated from m_rate
     bool IsFinished();

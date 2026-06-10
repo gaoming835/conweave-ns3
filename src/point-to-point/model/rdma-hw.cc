@@ -772,7 +772,7 @@ bool RdmaHw::EnqueueDcpHoRetrans(Ptr<RdmaQueuePair> qp, const DcpTag &hoTag) {
     if (hoTag.GetFlowId() >= 0 && qp->m_flow_id >= 0 && hoTag.GetFlowId() != qp->m_flow_id) {
         return false;
     }
-    return qp->EnqueueDcpRetrans(psn);
+    return qp->EnqueueDcpRetrans(psn, RdmaQueuePair::DCP_RETRANS_FROM_HO);
 }
 
 size_t RdmaHw::getIrnBufferOverhead() {
@@ -968,8 +968,10 @@ void RdmaHw::RedistributeQp() {
 
 Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
     uint32_t dcpRetransSeq = 0;
+    uint8_t dcpRetransSource = RdmaQueuePair::DCP_RETRANS_FROM_HO;
     bool dcpRetrans = false;
-    while (Settings::enable_dcp && qp->DequeueDcpRetrans(&dcpRetransSeq)) {
+    while (Settings::enable_dcp &&
+           qp->DequeueDcpRetrans(&dcpRetransSeq, &dcpRetransSource, m_mtu)) {
         Settings::dcp_retransq_dequeue++;
         if (dcpRetransSeq >= qp->snd_una && dcpRetransSeq < qp->snd_nxt &&
             dcpRetransSeq < qp->m_size) {
@@ -1059,7 +1061,13 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
         p->AddPacketTag(dcpDataTag);
         Settings::dcp_data_packets++;
         if (dcpRetrans) {
-            Settings::dcp_precise_retx++;
+            Settings::dcp_retrans_bytes += payload_size;
+            if (dcpRetransSource == RdmaQueuePair::DCP_RETRANS_FROM_TIMEOUT) {
+                Settings::dcp_retrans_from_timeout++;
+            } else {
+                Settings::dcp_precise_retx++;
+                Settings::dcp_retrans_from_ho++;
+            }
         }
     }
 
@@ -1121,7 +1129,27 @@ void RdmaHw::HandleTimeout(Ptr<RdmaQueuePair> qp, Time rto) {
 
     if (qp->irn.m_enabled) qp->irn.m_recovery = true;
 
-    if (Settings::enable_dcp) Settings::dcp_timeout_retx++;
+    if (Settings::enable_dcp) {
+        Settings::dcp_timeout_retx++;
+        uint32_t begin = (uint32_t)std::min<uint64_t>(qp->snd_una, qp->m_size);
+        uint32_t end = (uint32_t)std::min<uint64_t>(qp->snd_nxt, qp->m_size);
+        bool enqueued = false;
+        for (uint32_t psn = begin; psn < end;) {
+            if (qp->EnqueueDcpRetrans(psn, RdmaQueuePair::DCP_RETRANS_FROM_TIMEOUT)) {
+                Settings::dcp_retransq_enqueue++;
+                enqueued = true;
+            }
+            uint32_t step = std::min<uint32_t>(m_mtu, end - psn);
+            if (step == 0) {
+                break;
+            }
+            psn += step;
+        }
+        if (enqueued) {
+            dev->TriggerTransmit();
+        }
+        return;
+    }
 
     RecoverQueue(qp);
     dev->TriggerTransmit();
