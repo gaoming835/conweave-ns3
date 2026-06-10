@@ -62,6 +62,8 @@ expected_fields=(
   dcp_trim_events
   dcp_ho_generated
   dcp_ho_returned
+  dcp_ho_rx_at_receiver
+  dcp_ho_rx_at_sender
   dcp_precise_retx
   dcp_spurious_retx
   dcp_timeout_retx
@@ -80,6 +82,8 @@ done
 grep -q '^dcp_ho_packets,0$' "${stats_file}"
 grep -q '^dcp_trim_events,0$' "${stats_file}"
 grep -q '^dcp_ho_generated,0$' "${stats_file}"
+grep -q '^dcp_ho_rx_at_receiver,0$' "${stats_file}"
+grep -q '^dcp_ho_rx_at_sender,0$' "${stats_file}"
 grep -q '^dcp_ho_dropped,0$' "${stats_file}"
 grep -q '^dcp_data_dropped,0$' "${stats_file}"
 

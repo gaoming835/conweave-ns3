@@ -644,6 +644,8 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_trim_events,%lu\n", Settings::dcp_trim_events);
     fprintf(fout, "dcp_ho_generated,%lu\n", Settings::dcp_ho_generated);
     fprintf(fout, "dcp_ho_returned,%lu\n", Settings::dcp_ho_returned);
+    fprintf(fout, "dcp_ho_rx_at_receiver,%lu\n", Settings::dcp_ho_rx_at_receiver);
+    fprintf(fout, "dcp_ho_rx_at_sender,%lu\n", Settings::dcp_ho_rx_at_sender);
     fprintf(fout, "dcp_precise_retx,%lu\n", Settings::dcp_precise_retx);
     fprintf(fout, "dcp_spurious_retx,%lu\n", Settings::dcp_spurious_retx);
     fprintf(fout, "dcp_timeout_retx,%lu\n", Settings::dcp_timeout_retx);

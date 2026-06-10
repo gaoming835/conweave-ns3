@@ -15,6 +15,8 @@
 
 namespace ns3 {
 
+class DcpTag;
+
 struct RdmaInterfaceMgr {
     Ptr<QbbNetDevice> dev;
     Ptr<RdmaQueuePairGroup> qpGrp;
@@ -81,6 +83,7 @@ class RdmaHw : public Object {
     int ReceiveUdp(Ptr<Packet> p, CustomHeader &ch);
     int ReceiveCnp(Ptr<Packet> p, CustomHeader &ch);
     int ReceiveAck(Ptr<Packet> p, CustomHeader &ch);  // handle both ACK and NACK
+    void ReturnDcpHo(Ptr<Packet> p, CustomHeader &ch, const DcpTag &hoTag);
     int Receive(Ptr<Packet> p,
                 CustomHeader &
                     ch);  // callback function that the QbbNetDevice should use when receive

@@ -148,6 +148,8 @@ class Settings {
     static uint64_t dcp_trim_events;
     static uint64_t dcp_ho_generated;
     static uint64_t dcp_ho_returned;
+    static uint64_t dcp_ho_rx_at_receiver;
+    static uint64_t dcp_ho_rx_at_sender;
     static uint64_t dcp_precise_retx;
     static uint64_t dcp_spurious_retx;
     static uint64_t dcp_timeout_retx;

@@ -315,7 +315,8 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
     if (Settings::enable_dcp) {
         DcpTag dcpTag;
         if (p->PeekPacketTag(dcpTag) && dcpTag.GetPacketType() == DcpTag::DCP_HO) {
-            Settings::dcp_ho_returned++;
+            Settings::dcp_ho_rx_at_receiver++;
+            ReturnDcpHo(p, ch, dcpTag);
             return 1;
         }
     }
@@ -432,6 +433,59 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
     return 0;
 }
 
+void RdmaHw::ReturnDcpHo(Ptr<Packet> p, CustomHeader &ch, const DcpTag &hoTag) {
+    qbbHeader seqh;
+    seqh.SetSeq(hoTag.GetPsn());
+    seqh.SetPG(hoTag.GetPg());
+    seqh.SetSport(hoTag.GetDstPort());
+    seqh.SetDport(hoTag.GetSrcPort());
+    seqh.SetIntHeader(ch.udp.ih);
+    seqh.SetIrnNack(hoTag.GetPsn());
+    seqh.SetIrnNackSize(0);
+
+    Ptr<Packet> newp =
+        Create<Packet>(std::max(60 - 14 - 20 - (int)seqh.GetSerializedSize(), 0));
+    newp->AddHeader(seqh);
+
+    Ipv4Header head;
+    head.SetDestination(hoTag.GetSrc());
+    head.SetSource(hoTag.GetDst());
+    head.SetProtocol(0xFD);
+    head.SetTtl(64);
+    head.SetPayloadSize(newp->GetSize());
+
+    Ptr<RdmaRxQueuePair> rxQp =
+        GetRxQp(ch.dip, ch.sip, ch.udp.dport, ch.udp.sport, ch.udp.pg, false);
+    if (rxQp != NULL) {
+        head.SetIdentification(rxQp->m_ipid++);
+    }
+
+    FlowIDNUMTag fit;
+    if (p->PeekPacketTag(fit)) {
+        newp->AddPacketTag(fit);
+    }
+
+    DcpTag returnTag = hoTag;
+    returnTag.SetPacketType(DcpTag::DCP_HO);
+    newp->AddPacketTag(returnTag);
+
+    newp->AddHeader(head);
+    AddHeader(newp, 0x800);
+
+    uint32_t nic_idx = 0;
+    if (rxQp != NULL) {
+        nic_idx = GetNicIdxOfRxQp(rxQp);
+    } else {
+        auto rt = m_rtTable.find(hoTag.GetSrc().Get());
+        NS_ASSERT_MSG(rt != m_rtTable.end() && !rt->second.empty(),
+                      "DCP HO return cannot find a NIC toward the original sender");
+        nic_idx = rt->second[0];
+    }
+    m_nic[nic_idx].dev->RdmaEnqueueHighPrioQ(newp);
+    m_nic[nic_idx].dev->TriggerTransmit();
+    Settings::dcp_ho_returned++;
+}
+
 int RdmaHw::ReceiveCnp(Ptr<Packet> p, CustomHeader &ch) {
     std::cerr << "ReceiveCnp is called. Exit this program." << std::endl;
     exit(1);
@@ -501,6 +555,11 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
     uint32_t seq = ch.ack.seq;
     uint8_t cnp = (ch.ack.flags >> qbbHeader::FLAG_CNP) & 1;
     int i;
+    bool dcpHoReturn = false;
+    if (Settings::enable_dcp) {
+        DcpTag dcpTag;
+        dcpHoReturn = p->PeekPacketTag(dcpTag) && dcpTag.GetPacketType() == DcpTag::DCP_HO;
+    }
     uint64_t key = GetQpKey(ch.sip, port, sport, qIndex);
     Ptr<RdmaQueuePair> qp = GetQp(key);
     if (qp == NULL) {
@@ -519,6 +578,12 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader &ch) {
     uint32_t nic_idx = GetNicIdxOfQp(qp);
     Ptr<QbbNetDevice> dev = m_nic[nic_idx].dev;
     uint64_t sndUnaBeforeAck = qp->snd_una;
+
+    if (dcpHoReturn) {
+        Settings::dcp_ho_rx_at_sender++;
+        dev->TriggerTransmit();
+        return 0;
+    }
 
     if (m_ack_interval == 0)
         std::cout << "ERROR: shouldn't receive ack\n";
