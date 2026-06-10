@@ -24,6 +24,11 @@ static bool CheckTag(const DcpTag &tag, uint8_t type) {
     ok = Check(tag.GetSrcPort() == 10000, "src port mismatch") && ok;
     ok = Check(tag.GetDstPort() == 20000, "dst port mismatch") && ok;
     ok = Check(tag.GetPg() == 3, "PG mismatch") && ok;
+    ok = Check(tag.GetMsn() == 7, "MSN mismatch") && ok;
+    ok = Check(tag.GetEmsn() == 8, "eMSN mismatch") && ok;
+    ok = Check(tag.GetSRetryNo() == 2, "sRetryNo mismatch") && ok;
+    ok = Check(tag.GetMessageSize() == 4096, "message size mismatch") && ok;
+    ok = Check(tag.GetMessageOffset() == 1024, "message offset mismatch") && ok;
     return ok;
 }
 
@@ -57,6 +62,7 @@ int main() {
     dataTag.SetPacketType(DcpTag::DCP_DATA);
     dataTag.SetOriginalData(42, 12345, Ipv4Address("11.0.0.1"), Ipv4Address("11.0.1.1"), 10000,
                             20000, 3);
+    dataTag.SetMessageMetadata(7, 8, 2, 4096, 1024);
     ok = CheckTag(dataTag, DcpTag::DCP_DATA) && ok;
 
     Ptr<Packet> packet = Create<Packet>(128);
@@ -69,6 +75,7 @@ int main() {
     hoTag.SetPacketType(DcpTag::DCP_HO);
     hoTag.SetOriginalData(42, 12345, Ipv4Address("11.0.0.1"), Ipv4Address("11.0.1.1"), 10000,
                           20000, 3);
+    hoTag.SetMessageMetadata(7, 8, 2, 4096, 1024);
     ok = CheckTag(hoTag, DcpTag::DCP_HO) && ok;
 
     if (!ok) {

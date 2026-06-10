@@ -245,6 +245,7 @@ RdmaRxQueuePair::RdmaRxQueuePair() {
     m_flow_id = -1;
     m_dcp_flow_size = 0;
     m_dcp_completed = false;
+    m_dcp_next_emsn = 0;
 }
 
 bool RdmaRxQueuePair::DcpRecordPacket(uint32_t seq, uint32_t size, uint32_t flowSize,
@@ -292,6 +293,119 @@ bool RdmaRxQueuePair::DcpRecordPacket(uint32_t seq, uint32_t size, uint32_t flow
         return true;
     }
     return false;
+}
+
+RdmaRxQueuePair::DcpRecordResult RdmaRxQueuePair::DcpRecordMessagePacket(
+    uint32_t seq, uint32_t size, uint32_t msn, uint32_t emsn, uint32_t sRetryNo,
+    uint32_t messageSize, uint32_t messageOffset) {
+    DcpRecordResult result;
+    result.ackSeq = seq + size;
+    result.completedMsn = msn;
+    result.nextEmsn = m_dcp_next_emsn;
+    result.retransmitted = sRetryNo > 0;
+
+    if (messageSize == 0) {
+        messageSize = messageOffset + size;
+    }
+    if (messageOffset >= messageSize) {
+        result.duplicate = true;
+        return result;
+    }
+    if (messageOffset + size > messageSize) {
+        size = messageSize - messageOffset;
+    }
+    uint32_t messageBaseSeq = seq >= messageOffset ? seq - messageOffset : seq;
+    result.ackSeq = messageBaseSeq + messageSize;
+    result.ooo = msn > m_dcp_next_emsn || messageOffset > 0;
+
+    DcpMessageState &state = m_dcp_messages[msn];
+    if (state.messageSize == 0 || messageSize > state.messageSize) {
+        state.messageSize = messageSize;
+    }
+    if (sRetryNo > 0) {
+        state.retryNos.insert(sRetryNo);
+    }
+
+    uint32_t newStart = messageOffset;
+    uint32_t newEnd = messageOffset + size;
+    uint32_t newBytes = 0;
+    uint32_t cursor = newStart;
+    for (const auto &block : state.received) {
+        uint32_t blockStart = block.first;
+        uint32_t blockEnd = block.first + block.second;
+        if (blockEnd <= cursor) {
+            continue;
+        }
+        if (blockStart >= newEnd) {
+            break;
+        }
+        if (blockStart > cursor) {
+            newBytes += blockStart - cursor;
+        }
+        if (blockEnd > cursor) {
+            cursor = std::max(cursor, blockEnd);
+        }
+        if (cursor >= newEnd) {
+            break;
+        }
+    }
+    if (cursor < newEnd) {
+        newBytes += newEnd - cursor;
+    }
+    state.receivedBytes += newBytes;
+
+    if (newBytes == 0 && size > 0) {
+        result.duplicate = true;
+    }
+    if (state.complete || state.receivedBytes >= state.messageSize) {
+        result.duplicate = state.complete;
+        if (!state.complete) {
+            state.complete = true;
+            m_dcp_completed_msns.insert(msn);
+            result.messageCompleted = true;
+        }
+    }
+
+    auto it = state.received.lower_bound(newStart);
+    if (it != state.received.begin()) {
+        --it;
+    }
+    while (it != state.received.end()) {
+        uint32_t blockStart = it->first;
+        uint32_t blockEnd = blockStart + it->second;
+        if (blockEnd < newStart) {
+            ++it;
+            continue;
+        }
+        if (blockStart > newEnd) {
+            break;
+        }
+        newStart = std::min(newStart, blockStart);
+        newEnd = std::max(newEnd, blockEnd);
+        it = state.received.erase(it);
+    }
+    state.received[newStart] = newEnd - newStart;
+
+    uint32_t oldEmsn = m_dcp_next_emsn;
+    while (m_dcp_completed_msns.find(m_dcp_next_emsn) != m_dcp_completed_msns.end()) {
+        m_dcp_next_emsn++;
+    }
+    uint32_t targetEmsn = std::max(emsn, msn + 1);
+    if (targetEmsn > m_dcp_next_emsn) {
+        bool contiguous = true;
+        for (uint32_t cur = m_dcp_next_emsn; cur < targetEmsn; ++cur) {
+            if (m_dcp_completed_msns.find(cur) == m_dcp_completed_msns.end()) {
+                contiguous = false;
+                break;
+            }
+        }
+        if (contiguous) {
+            m_dcp_next_emsn = targetEmsn;
+        }
+    }
+    result.emsnAdvanced = m_dcp_next_emsn != oldEmsn;
+    result.nextEmsn = m_dcp_next_emsn;
+    return result;
 }
 
 uint32_t RdmaRxQueuePair::GetHash(void) {

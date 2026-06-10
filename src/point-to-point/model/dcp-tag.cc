@@ -16,7 +16,12 @@ DcpTag::DcpTag()
       m_dst("0.0.0.0"),
       m_srcPort(0),
       m_dstPort(0),
-      m_pg(0) {}
+      m_pg(0),
+      m_msn(0),
+      m_emsn(0),
+      m_sRetryNo(0),
+      m_messageSize(0),
+      m_messageOffset(0) {}
 
 TypeId DcpTag::GetTypeId(void) {
     static TypeId tid = TypeId("ns3::DcpTag").SetParent<Tag>().AddConstructor<DcpTag>();
@@ -27,7 +32,9 @@ TypeId DcpTag::GetInstanceTypeId(void) const { return GetTypeId(); }
 
 uint32_t DcpTag::GetSerializedSize(void) const {
     return sizeof(m_packetType) + sizeof(uint32_t) + sizeof(m_psn) + sizeof(uint32_t) +
-           sizeof(uint32_t) + sizeof(m_srcPort) + sizeof(m_dstPort) + sizeof(m_pg);
+           sizeof(uint32_t) + sizeof(m_srcPort) + sizeof(m_dstPort) + sizeof(m_pg) +
+           sizeof(m_msn) + sizeof(m_emsn) + sizeof(m_sRetryNo) + sizeof(m_messageSize) +
+           sizeof(m_messageOffset);
 }
 
 void DcpTag::Serialize(TagBuffer i) const {
@@ -39,6 +46,11 @@ void DcpTag::Serialize(TagBuffer i) const {
     i.WriteU16(m_srcPort);
     i.WriteU16(m_dstPort);
     i.WriteU16(m_pg);
+    i.WriteU32(m_msn);
+    i.WriteU32(m_emsn);
+    i.WriteU32(m_sRetryNo);
+    i.WriteU32(m_messageSize);
+    i.WriteU32(m_messageOffset);
 }
 
 void DcpTag::Deserialize(TagBuffer i) {
@@ -50,12 +62,19 @@ void DcpTag::Deserialize(TagBuffer i) {
     m_srcPort = i.ReadU16();
     m_dstPort = i.ReadU16();
     m_pg = i.ReadU16();
+    m_msn = i.ReadU32();
+    m_emsn = i.ReadU32();
+    m_sRetryNo = i.ReadU32();
+    m_messageSize = i.ReadU32();
+    m_messageOffset = i.ReadU32();
 }
 
 void DcpTag::Print(std::ostream &os) const {
     os << "type=" << PacketTypeToString(m_packetType) << ",flow=" << m_flowId
        << ",psn=" << m_psn << ",src=" << m_src << ":" << m_srcPort << ",dst=" << m_dst
-       << ":" << m_dstPort << ",pg=" << m_pg;
+       << ":" << m_dstPort << ",pg=" << m_pg << ",msn=" << m_msn << ",emsn=" << m_emsn
+       << ",sRetryNo=" << m_sRetryNo << ",messageSize=" << m_messageSize
+       << ",messageOffset=" << m_messageOffset;
 }
 
 void DcpTag::SetPacketType(uint8_t type) { m_packetType = type; }
@@ -92,6 +111,21 @@ void DcpTag::SetOriginalData(int32_t flowId, uint32_t psn, Ipv4Address src, Ipv4
     m_dstPort = dstPort;
     m_pg = pg;
 }
+
+void DcpTag::SetMessageMetadata(uint32_t msn, uint32_t emsn, uint32_t sRetryNo,
+                                uint32_t messageSize, uint32_t messageOffset) {
+    m_msn = msn;
+    m_emsn = emsn;
+    m_sRetryNo = sRetryNo;
+    m_messageSize = messageSize;
+    m_messageOffset = messageOffset;
+}
+
+uint32_t DcpTag::GetMsn(void) const { return m_msn; }
+uint32_t DcpTag::GetEmsn(void) const { return m_emsn; }
+uint32_t DcpTag::GetSRetryNo(void) const { return m_sRetryNo; }
+uint32_t DcpTag::GetMessageSize(void) const { return m_messageSize; }
+uint32_t DcpTag::GetMessageOffset(void) const { return m_messageOffset; }
 
 uint8_t DcpTag::PreserveEcnAndSetDcpType(uint8_t tos, uint8_t type) {
     return (tos & ~kDcpTypeMask) | ((type & kDcpTypeValueMask) << kDcpTypeShift);

@@ -13,6 +13,7 @@
 #include <climits> /* for CHAR_BIT */
 #include <deque>
 #include <map>
+#include <set>
 #include <unordered_set>
 #include <vector>
 
@@ -245,11 +246,34 @@ class RdmaRxQueuePair : public Object {  // Rx side queue pair
     uint32_t m_dcp_flow_size;
     bool m_dcp_completed;
     std::map<uint32_t, uint32_t> m_dcp_received;
+    uint32_t m_dcp_next_emsn;
+    std::set<uint32_t> m_dcp_completed_msns;
+    struct DcpMessageState {
+        uint32_t messageSize{0};
+        uint32_t receivedBytes{0};
+        bool complete{false};
+        std::map<uint32_t, uint32_t> received;
+        std::set<uint32_t> retryNos;
+    };
+    std::map<uint32_t, DcpMessageState> m_dcp_messages;
+    struct DcpRecordResult {
+        bool messageCompleted{false};
+        bool emsnAdvanced{false};
+        bool ooo{false};
+        bool duplicate{false};
+        bool retransmitted{false};
+        uint32_t ackSeq{0};
+        uint32_t completedMsn{0};
+        uint32_t nextEmsn{0};
+    };
 
     static TypeId GetTypeId(void);
     RdmaRxQueuePair();
     bool DcpRecordPacket(uint32_t seq, uint32_t size, uint32_t flowSize, uint32_t *ackSeq,
                          bool *ooo);
+    DcpRecordResult DcpRecordMessagePacket(uint32_t seq, uint32_t size, uint32_t msn,
+                                           uint32_t emsn, uint32_t sRetryNo,
+                                           uint32_t messageSize, uint32_t messageOffset);
     uint32_t GetHash(void);
 };
 

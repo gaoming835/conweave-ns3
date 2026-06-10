@@ -15,11 +15,14 @@ get_stat() {
 }
 
 dcp_ooo_packets="$(get_stat dcp_ooo_packets)"
+dcp_duplicate_packets="$(get_stat dcp_duplicate_packets)"
+dcp_retransmitted_packets="$(get_stat dcp_retransmitted_packets)"
+dcp_emsn_advancements="$(get_stat dcp_emsn_advancements)"
 dcp_completed_messages="$(get_stat dcp_completed_messages)"
 dcp_ack_packets="$(get_stat dcp_ack_packets)"
 dcp_spurious_retx="$(get_stat dcp_spurious_retx)"
 
-for value in dcp_ooo_packets dcp_completed_messages dcp_ack_packets dcp_spurious_retx; do
+for value in dcp_ooo_packets dcp_duplicate_packets dcp_retransmitted_packets dcp_emsn_advancements dcp_completed_messages dcp_ack_packets dcp_spurious_retx; do
   if [[ -z "${!value}" ]]; then
     echo "missing ${value} in dcp-ooo-receiver-test output" >&2
     echo "${output}" >&2
@@ -39,9 +42,24 @@ if (( dcp_completed_messages <= 0 )); then
   echo "expected dcp_completed_messages > 0, got ${dcp_completed_messages}" >&2
   exit 1
 fi
+if (( dcp_duplicate_packets <= 0 )); then
+  echo "expected dcp_duplicate_packets > 0, got ${dcp_duplicate_packets}" >&2
+  exit 1
+fi
+if (( dcp_retransmitted_packets <= 0 )); then
+  echo "expected dcp_retransmitted_packets > 0, got ${dcp_retransmitted_packets}" >&2
+  exit 1
+fi
+if (( dcp_emsn_advancements <= 0 )); then
+  echo "expected dcp_emsn_advancements > 0, got ${dcp_emsn_advancements}" >&2
+  exit 1
+fi
 
 echo "dcp_ooo_smoke=pass"
 echo "dcp_ooo_packets=${dcp_ooo_packets}"
+echo "dcp_duplicate_packets=${dcp_duplicate_packets}"
+echo "dcp_retransmitted_packets=${dcp_retransmitted_packets}"
+echo "dcp_emsn_advancements=${dcp_emsn_advancements}"
 echo "dcp_completed_messages=${dcp_completed_messages}"
 echo "dcp_ack_packets=${dcp_ack_packets}"
 echo "dcp_spurious_retx=${dcp_spurious_retx}"

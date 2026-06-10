@@ -182,7 +182,7 @@ def validate_bcc_config(cc_mode, enable_bcc, ack_high_prio):
 
 def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retrans_per_round,
                            enable_timeout_retx, enable_wrr, control_weight, data_weight,
-                           inc_scale_n, ho_data_ratio_r):
+                           inc_scale_n, ho_data_ratio_r, enable_message_tracking):
     if not enable_dcp:
         return ""
     return (
@@ -198,6 +198,7 @@ def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retra
         "DCP_DATA_WEIGHT {data_weight}\n"
         "DCP_INC_SCALE_N {inc_scale_n}\n"
         "DCP_HO_DATA_RATIO_R {ho_data_ratio_r}\n"
+        "DCP_ENABLE_MESSAGE_TRACKING {enable_message_tracking}\n"
     ).format(id=config_id, trim_threshold=trim_threshold,
              ho_size=ho_size,
              retrans_per_round=retrans_per_round,
@@ -206,7 +207,8 @@ def build_dcp_config_block(enable_dcp, config_id, trim_threshold, ho_size, retra
              control_weight=control_weight,
              data_weight=data_weight,
              inc_scale_n=inc_scale_n,
-             ho_data_ratio_r=ho_data_ratio_r)
+             ho_data_ratio_r=ho_data_ratio_r,
+             enable_message_tracking=enable_message_tracking)
 
 
 def main():
@@ -284,6 +286,9 @@ def main():
     parser.add_argument('--dcp_ho_data_ratio_r', dest='dcp_ho_data_ratio_r', action='store',
                         type=float, default=0.057,
                         help="DCP WRR formula HO/data size ratio R when explicit weights are disabled (default: 0.057)")
+    parser.add_argument('--dcp_enable_message_tracking', dest='dcp_enable_message_tracking',
+                        action='store', type=int, default=1,
+                        help="enable DCP bitmap-free message-level receiver tracking; 0 uses compat flow-interval tracking (default: 1)")
     parser.add_argument('--ack_high_prio', dest='ack_high_prio', action='store',
                         type=int, default=1, help="set high priority for ACK/NACK packets (default: 1)")
     parser.add_argument('--bcc_u', dest='bcc_u', action='store',
@@ -563,7 +568,8 @@ def main():
                                             args.dcp_control_weight,
                                             args.dcp_data_weight,
                                             args.dcp_inc_scale_n,
-                                            args.dcp_ho_data_ratio_r),
+                                            args.dcp_ho_data_ratio_r,
+                                            args.dcp_enable_message_tracking),
                                         ack_high_prio=ack_high_prio,
                                         bcc_u=args.bcc_u,
                                         bcc_s=args.bcc_s,

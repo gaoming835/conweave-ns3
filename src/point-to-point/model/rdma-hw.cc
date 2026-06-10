@@ -375,15 +375,42 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
             }
         }
 
-        bool ooo = false;
-        uint32_t ackSeq = 0;
-        bool completed = rxQp->DcpRecordPacket(ch.udp.seq, payload_size, flowSize, &ackSeq, &ooo);
-        if (ooo) {
-            Settings::dcp_ooo_packets++;
-        }
-        if (completed) {
-            Settings::dcp_completed_messages++;
-            SendAck(rxQp, p, ch, ackSeq, 0xFC, false, false, false);
+        DcpTag dcpDataTag;
+        bool hasDcpDataTag =
+            ResolveDcpTypeFromHeaderOrTag(ch.m_tos, p, DcpTag::DCP_DATA, &dcpDataTag);
+        if (Settings::dcp_enable_message_tracking && hasDcpDataTag) {
+            RdmaRxQueuePair::DcpRecordResult result = rxQp->DcpRecordMessagePacket(
+                ch.udp.seq, payload_size, dcpDataTag.GetMsn(), dcpDataTag.GetEmsn(),
+                dcpDataTag.GetSRetryNo(), dcpDataTag.GetMessageSize(),
+                dcpDataTag.GetMessageOffset());
+            if (result.ooo) {
+                Settings::dcp_ooo_packets++;
+            }
+            if (result.duplicate) {
+                Settings::dcp_duplicate_packets++;
+            }
+            if (result.retransmitted) {
+                Settings::dcp_retransmitted_packets++;
+            }
+            if (result.emsnAdvanced) {
+                Settings::dcp_emsn_advancements++;
+            }
+            if (result.messageCompleted) {
+                Settings::dcp_completed_messages++;
+                SendAck(rxQp, p, ch, result.ackSeq, 0xFC, false, false, false);
+            }
+        } else {
+            bool ooo = false;
+            uint32_t ackSeq = 0;
+            bool completed =
+                rxQp->DcpRecordPacket(ch.udp.seq, payload_size, flowSize, &ackSeq, &ooo);
+            if (ooo) {
+                Settings::dcp_ooo_packets++;
+            }
+            if (completed) {
+                Settings::dcp_completed_messages++;
+                SendAck(rxQp, p, ch, ackSeq, 0xFC, false, false, false);
+            }
         }
         return 0;
     }
@@ -1028,6 +1055,7 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
         dcpDataTag.SetPacketType(DcpTag::DCP_DATA);
         dcpDataTag.SetOriginalData(qp->m_flow_id, seq, qp->sip, qp->dip, qp->sport, qp->dport,
                                   qp->m_pg);
+        dcpDataTag.SetMessageMetadata(0, 1, dcpRetrans ? 1 : 0, (uint32_t)qp->m_size, seq);
         p->AddPacketTag(dcpDataTag);
         Settings::dcp_data_packets++;
         if (dcpRetrans) {

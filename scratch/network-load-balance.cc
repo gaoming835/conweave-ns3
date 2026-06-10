@@ -653,6 +653,9 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_spurious_retx,%lu\n", Settings::dcp_spurious_retx);
     fprintf(fout, "dcp_timeout_retx,%lu\n", Settings::dcp_timeout_retx);
     fprintf(fout, "dcp_ooo_packets,%lu\n", Settings::dcp_ooo_packets);
+    fprintf(fout, "dcp_duplicate_packets,%lu\n", Settings::dcp_duplicate_packets);
+    fprintf(fout, "dcp_retransmitted_packets,%lu\n", Settings::dcp_retransmitted_packets);
+    fprintf(fout, "dcp_emsn_advancements,%lu\n", Settings::dcp_emsn_advancements);
     fprintf(fout, "dcp_completed_messages,%lu\n", Settings::dcp_completed_messages);
     fprintf(fout, "dcp_ho_dropped,%lu\n", Settings::dcp_ho_dropped);
     fprintf(fout, "dcp_data_dropped,%lu\n", Settings::dcp_data_dropped);
@@ -667,6 +670,8 @@ void dcp_stats_print() {
     fprintf(fout, "dcp_data_weight,%u\n", Settings::dcp_data_weight);
     fprintf(fout, "dcp_inc_scale_n,%u\n", Settings::dcp_inc_scale_n);
     fprintf(fout, "dcp_ho_data_ratio_r,%.6f\n", Settings::dcp_ho_data_ratio_r);
+    fprintf(fout, "dcp_enable_message_tracking,%u\n",
+            Settings::dcp_enable_message_tracking ? 1 : 0);
     fprintf(fout, "dcp_control_queue_max_len,%lu\n", Settings::dcp_control_queue_max_len);
     fprintf(fout, "dcp_data_queue_max_len,%lu\n", Settings::dcp_data_queue_max_len);
     fprintf(fout, "dcp_control_queue_avg_len,%.6f\n",
@@ -1340,6 +1345,10 @@ int main(int argc, char *argv[]) {
                     Settings::dcp_ho_data_ratio_r = 0.0;
                 }
                 std::cerr << "DCP_HO_DATA_RATIO_R\t\t" << Settings::dcp_ho_data_ratio_r << "\n";
+            } else if (key.compare("DCP_ENABLE_MESSAGE_TRACKING") == 0) {
+                conf >> Settings::dcp_enable_message_tracking;
+                std::cerr << "DCP_ENABLE_MESSAGE_TRACKING\t"
+                          << Settings::dcp_enable_message_tracking << "\n";
             } else if (key.compare("VOQ_MON_FILE") == 0) {
                 conf >> voq_mon_file;
                 std::cerr << "VOQ_MON_FILE\t\t\t\t" << voq_mon_file << '\n';

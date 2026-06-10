@@ -52,6 +52,13 @@ class DcpTag : public Tag {
 
     void SetOriginalData(int32_t flowId, uint32_t psn, Ipv4Address src, Ipv4Address dst,
                          uint16_t srcPort, uint16_t dstPort, uint16_t pg);
+    void SetMessageMetadata(uint32_t msn, uint32_t emsn, uint32_t sRetryNo,
+                            uint32_t messageSize, uint32_t messageOffset);
+    uint32_t GetMsn(void) const;
+    uint32_t GetEmsn(void) const;
+    uint32_t GetSRetryNo(void) const;
+    uint32_t GetMessageSize(void) const;
+    uint32_t GetMessageOffset(void) const;
 
     static uint8_t PreserveEcnAndSetDcpType(uint8_t tos, uint8_t type);
     static void SetDcpTypeInIpHeader(Ipv4Header &header, uint8_t type);
@@ -68,6 +75,11 @@ class DcpTag : public Tag {
     uint16_t m_srcPort;
     uint16_t m_dstPort;
     uint16_t m_pg;
+    uint32_t m_msn;
+    uint32_t m_emsn;
+    uint32_t m_sRetryNo;
+    uint32_t m_messageSize;
+    uint32_t m_messageOffset;
 };
 
 }  // namespace ns3
